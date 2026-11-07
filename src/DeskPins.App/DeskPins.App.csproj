@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>WinExe</OutputType><UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms><AssemblyName>DeskPins</AssemblyName><ApplicationManifest>app.manifest</ApplicationManifest><StartupObject>DeskPins.App.Program</StartupObject><ApplicationIcon>../../assets/icons/DeskPins.ico</ApplicationIcon></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../DeskPins.Core/DeskPins.Core.csproj"/><Reference Include="System.Net.Http"/><Reference Include="Microsoft.CSharp"/><Reference Include="System.Security"/><Reference Include="System.Runtime.Serialization"/><Reference Include="System.IO.Compression"/><Reference Include="System.IO.Compression.FileSystem"/></ItemGroup>
+<ItemGroup><EmbeddedResource Include="../../assets/icons/DeskPins.ico" LogicalName="DeskPins.Icon.ico"/></ItemGroup>
+</Project>
