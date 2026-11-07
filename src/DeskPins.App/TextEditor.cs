@@ -18,6 +18,8 @@ namespace DeskPins.App
     {
         private static readonly DependencyProperty[] formatProperties = { TextElement.FontFamilyProperty, TextElement.FontSizeProperty, TextElement.FontWeightProperty, TextElement.FontStyleProperty, TextElement.ForegroundProperty, Inline.TextDecorationsProperty };
         private static object[] copiedFormat;
+        public string PlainText { get { return new TextRange(Document.ContentStart, Document.ContentEnd).Text.TrimEnd('\r', '\n'); } }
+        public string SelectedPlainText { get { return Selection.IsEmpty ? PlainText : Selection.Text; } }
         public void CopyFormat() { copiedFormat = formatProperties.Select(p => Selection.GetPropertyValue(p)).ToArray(); }
         public void PasteFormat() { if (IsReadOnly || copiedFormat == null) return; for (int i = 0; i < formatProperties.Length; i++) if (copiedFormat[i] != DependencyProperty.UnsetValue) Selection.ApplyPropertyValue(formatProperties[i], copiedFormat[i]); }
         public void Quote() { if (IsReadOnly) return; var range = new TextRange(Document.ContentStart, Document.ContentEnd); range.Text = string.Join("\n", range.Text.TrimEnd('\r', '\n').Replace("\r\n", "\n").Split('\n').Select(line => "> " + line)) + "\n\n"; CaretPosition = Document.ContentEnd; }
@@ -97,17 +99,24 @@ namespace DeskPins.App
         public bool Find(string term)
         {
             if (string.IsNullOrEmpty(term)) return false;
-            TextPointer p = Selection.End;
-            for (int pass = 0; pass < 2; pass++)
+            var text = new StringBuilder(); var starts = new System.Collections.Generic.List<TextPointer>(); var ends = new System.Collections.Generic.List<TextPointer>();
+            var p = Document.ContentStart;
+            while (p != null && p.CompareTo(Document.ContentEnd) < 0)
             {
-                while (p != null && p.CompareTo(Document.ContentEnd) < 0)
+                if (p.GetPointerContext(LogicalDirection.Forward) == TextPointerContext.Text)
                 {
-                    if (p.GetPointerContext(LogicalDirection.Forward) == TextPointerContext.Text) { string text = p.GetTextInRun(LogicalDirection.Forward); int offset = text.IndexOf(term, StringComparison.CurrentCultureIgnoreCase); if (offset >= 0) { var start = p.GetPositionAtOffset(offset); Selection.Select(start, start.GetPositionAtOffset(term.Length)); Focus(); return true; } p = p.GetPositionAtOffset(text.Length); }
-                    else p = p.GetNextContextPosition(LogicalDirection.Forward);
+                    string run = p.GetTextInRun(LogicalDirection.Forward); text.Append(run);
+                    for (int i = 0; i < run.Length; i++) { starts.Add(p.GetPositionAtOffset(i)); ends.Add(p.GetPositionAtOffset(i + 1)); }
+                    p = p.GetPositionAtOffset(run.Length);
                 }
-                p = Document.ContentStart;
+                else { if (p.GetPointerContext(LogicalDirection.Forward) == TextPointerContext.EmbeddedElement || (p.GetPointerContext(LogicalDirection.Forward) == TextPointerContext.ElementEnd && (p.Parent is Paragraph || p.Parent is LineBreak))) { text.Append('\n'); starts.Add(p); ends.Add(p.GetNextContextPosition(LogicalDirection.Forward)); } p = p.GetNextContextPosition(LogicalDirection.Forward); }
             }
-            return false;
+            if (starts.Count == 0) return false;
+            int from = starts.FindIndex(pointer => pointer.CompareTo(Selection.End) >= 0); string content = text.ToString();
+            int offset = from < 0 ? -1 : content.IndexOf(term, from, StringComparison.OrdinalIgnoreCase);
+            if (offset < 0) offset = content.IndexOf(term, StringComparison.OrdinalIgnoreCase);
+            if (offset < 0) return false;
+            Selection.Select(starts[offset], ends[offset + term.Length - 1]); Focus(); return true;
         }
         private void DoubleClick(object sender, MouseButtonEventArgs e)
         {

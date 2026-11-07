@@ -14,11 +14,13 @@ namespace DeskPins.Tests
     internal static class Program
     {
         private static int checks;
+        private static string auditDirectory;
         private static void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); checks++; Console.WriteLine("PASS " + name); }
         private static void Throws(Action action, string name) { bool threw = false; try { action(); } catch { threw = true; } Check(threw, name); }
         [STAThread]
         private static int Main(string[] args)
         {
+            auditDirectory = DeskPins.App.Program.Option(args, "--audit-dir");
             if (args.Length >= 2 && args[0] == "--seed") { string target = args[1]; Directory.CreateDirectory(target); using (var lib = new NoteLibrary(Path.Combine(target, "deskpins.db"))) { for (int i = 0; i < 10; i++) { var n = lib.Create(); n.Title = "Sample " + i; n.PlainText = "Sample desktop note " + i; n.Body = Encoding.ASCII.GetBytes(@"{\rtf1 Sample desktop note}"); lib.Save(n); } } return 0; }
             string dir = Path.Combine(Path.GetTempPath(), "DeskPins-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(dir);
             try
@@ -40,6 +42,8 @@ namespace DeskPins.Tests
             Check(WindowMatch.Wildcard("Document - Editor", "* - Editor"), "wildcard title"); Check(!WindowMatch.Wildcard("Document - Browser", "* - Editor"), "wildcard negative");
             rule = new RepeatRule { Kind = RepeatKind.Weekly, StartLocal = new DateTime(2027, 1, 1), WeekDays = 0 }; Throws(() => RepeatSchedule.Next(rule, new DateTime(2026, 1, 1)), "empty weekdays rejected before start");
             rule = new RepeatRule { Kind = RepeatKind.Daily, StartLocal = DateTime.MinValue }; Check(RepeatSchedule.Next(rule, DateTime.MaxValue) == null, "date overflow terminates recurrence");
+            rule = new RepeatRule { Kind = RepeatKind.Weekly, StartLocal = new DateTime(2027, 1, 3, 9, 0, 0), WeekDays = 1 }; Check(RepeatSchedule.Next(rule, new DateTime(2027, 1, 1)) == new DateTime(2027, 1, 4, 9, 0, 0), "future recurrence start respects selected weekday");
+            rule.Kind = RepeatKind.MonthlyDay; rule.Day = 15; Check(RepeatSchedule.Next(rule, new DateTime(2027, 1, 1)) == new DateTime(2027, 1, 15, 9, 0, 0), "future recurrence start respects monthly day");
         }
         private static void Encryption()
         {
@@ -121,8 +125,93 @@ namespace DeskPins.Tests
                 var transfer = Path.Combine(dir, "transfer.dpx"); host.Library.Catalog.Settings.TransferFile = transfer; var outbound = host.Library.Create(); outbound.PlainText = "transfer content"; host.Library.Save(outbound); host.TransferFile(outbound, false); byte[] originalTransfer = File.ReadAllBytes(transfer); int noteCount = host.Library.Notes.Count; host.ImportTransfer(); Check(host.Library.Notes.Count == noteCount + 1 && new FileInfo(transfer).Length == 0, "transfer consumes only after successful import"); AtomicFile.Write(transfer, originalTransfer); host.ImportTransfer(); Check(host.Library.Notes.Count == noteCount + 1, "transfer retry after interrupted consumption avoids duplicates");
                 host.Api.Execute("do stickymenuadd test Extension"); var menu = new System.Windows.Controls.ContextMenu(); host.AddExtensionMenus(menu, n); Check(menu.Items.Count == 1, "extension menu registration"); host.Api.Start(); var task = System.Threading.Tasks.Task.Run(() => ApiService.Client(Path.Combine(dir, "ui"), "do ping")); var deadline = DateTime.UtcNow.AddSeconds(5); while (!task.IsCompleted && DateTime.UtcNow < deadline) { var frame = new System.Windows.Threading.DispatcherFrame(); System.Windows.Threading.Dispatcher.CurrentDispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() => frame.Continue = false)); System.Windows.Threading.Dispatcher.PushFrame(frame); System.Threading.Thread.Sleep(5); }
                 Check(task.IsCompleted && task.Result.Contains("pong"), "named pipe IPC round trip");
+                InteractionTests(host);
             }
             app.Shutdown();
+        }
+        private static T Field<T>(object instance, string name) { return (T)instance.GetType().GetField(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(instance); }
+        private static void InteractionTests(AppHost host)
+        {
+            var first = host.Library.Create(); var second = host.Library.Create();
+            host.Focus(first); Check(System.Windows.Input.FocusManager.GetFocusedElement(host.Windows[first.Id]) == host.Windows[first.Id].TextEditor, "focusing note targets text editor for immediate typing");
+            var manager = new ManagerWindow(host);
+            var categories = Field<System.Windows.Controls.ListBox>(manager, "categories"); var listing = Field<System.Windows.Controls.ListBox>(manager, "notes");
+            categories.SelectedIndex = 1; listing.SelectedItems.Add(first); listing.SelectedItems.Add(second); manager.Refresh();
+            Check(listing.SelectedItems.Count == 2, "manager refresh preserves multiple selection");
+            var folder = new Folder { Name = "Collection added while manager is open" }; host.Library.Catalog.Folders.Add(folder); categories.SelectedIndex = 8;
+            var tree = Field<System.Windows.Controls.TreeView>(manager, "tree"); folder.Name = "Renamed collection"; host.Library.SaveCatalog(); manager.Refresh();
+            Check(((System.Windows.Controls.TreeViewItem)tree.Items[tree.Items.Count - 1]).Header.ToString() == folder.Name, "manager navigation reflects collection changes");
+            var imageNote = host.Library.Create(NoteKind.Image); host.Sync(); var imageWindow = host.Windows[imageNote.Id];
+            host.Library.Catalog.Settings.Styles[1].Color = "#123456"; host.Library.Catalog.Settings.Styles[1].Topmost = true; imageWindow.ApplyStyle(1);
+            Check(host.Library.Repository.LoadMetadata().Single(x => x.Id == imageNote.Id).Color == "#123456", "image note style persists immediately");
+            Check(imageWindow.Topmost, "style applies topmost to live window");
+            imageWindow.Toggle("top"); Check(!imageWindow.Topmost, "topmost toggle updates live window");
+            imageNote.Title = "Changed window title"; host.Library.Save(imageNote); host.Sync(); Check(imageWindow.Title.EndsWith("Changed window title"), "window title reflects note rename");
+            imageWindow.ImageEditor.Selection = new Rect(200, 100, 20, 20); imageWindow.ImageEditor.ResizeImage(30, 20); imageWindow.ImageEditor.Undo(); imageWindow.ImageEditor.Undo(true);
+            Check(imageWindow.ImageEditor.Selection.IsEmpty, "image undo clears stale selection bounds");
+            var textNote = host.Library.Create(); host.Sync(); var textWindow = host.Windows[textNote.Id]; textWindow.TextEditor.InsertText("latest unflushed text"); textWindow.TextEditor.Selection.Select(textWindow.TextEditor.Document.ContentEnd, textWindow.TextEditor.Document.ContentEnd);
+            Check(textWindow.TextEditor.SelectedPlainText.Contains("latest unflushed text"), "plain copy source uses current editor content");
+            host.Library.Catalog.Settings.Shortcuts["copy"] = "Ctrl+Alt+C";
+            var textMenu = (System.Windows.Controls.ContextMenu)typeof(NoteWindow).GetMethod("TextMenu", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(textWindow, null);
+            Check(((System.Windows.Controls.MenuItem)textMenu.Items[1]).InputGestureText == "Ctrl+Alt+C" && host.ActionFor(System.Windows.Input.Key.C, System.Windows.Input.ModifierKeys.Control | System.Windows.Input.ModifierKeys.Alt) == "copy", "menu shortcut matches configured keyboard action"); host.Library.Catalog.Settings.Shortcuts.Remove("copy");
+            var rich = new TextEditor(); rich.Document.Blocks.Clear(); var paragraph = new System.Windows.Documents.Paragraph(); paragraph.Inlines.Add(new System.Windows.Documents.Run("mixed ")); paragraph.Inlines.Add(new System.Windows.Documents.Run("format") { FontWeight = FontWeights.Bold }); paragraph.Inlines.Add(new System.Windows.Documents.Run(" search")); rich.Document.Blocks.Add(paragraph);
+            Check(rich.Find("mixed format") && rich.Selection.Text == "mixed format", "find spans differently formatted runs");
+            var embedded = new TextEditor(); embedded.InsertText("Image inside text: "); embedded.InsertImage(imageWindow.ImageEditor.Image); var saved = new Note(); embedded.Write(saved); var reloaded = new TextEditor(); reloaded.Read(saved);
+            Check(Descendants(reloaded.Document).OfType<System.Windows.Controls.Image>().Any(), "embedded text image survives RTF save and reload");
+            rich.Selection.Select(rich.Document.ContentEnd, rich.Document.ContentEnd); Check(rich.Find("mixed format"), "find wraps after document end");
+            var canvas = new ImageEditor(); canvas.Read(new byte[0]); byte[] blank = canvas.Bytes(); int changes = 0; canvas.Changed += () => changes++;
+            canvas.BeginStroke(new Point(10, 10)); canvas.ContinueStroke(new Point(25, 25)); canvas.CancelEdit(); Check(canvas.Bytes().SequenceEqual(blank) && changes == 0, "cancel restores incomplete image stroke");
+            canvas.BeginStroke(new Point(10, 10)); canvas.ContinueStroke(new Point(25, 25)); canvas.Locked = true; Check(canvas.Bytes().SequenceEqual(blank), "locking canvas cancels incomplete stroke"); canvas.Locked = false;
+            canvas.BeginStroke(new Point(10, 10)); canvas.CommitStroke(new Point(10, 10)); Check(!canvas.Bytes().SequenceEqual(blank) && changes == 1, "single pen click draws a dot"); canvas.Undo(); Check(canvas.Bytes().SequenceEqual(blank), "committed stroke undo restores image"); canvas.Undo(true);
+            canvas.Tool = ImageTool.Select; canvas.BeginStroke(new Point(0, 0)); canvas.CommitStroke(new Point(250, 160)); Check(canvas.Selection.Width == 250 && canvas.Selection.Height == 160 && changes == 3, "selection reaches image edges without content change"); canvas.Undo(); Check(canvas.Bytes().SequenceEqual(blank), "selection does not consume drawing undo");
+            var settings = new Settings(); settings.Normalize(); settings.Shortcuts["new"] = "Ctrl+C"; Throws(() => host.ValidateSettings(settings), "shortcut conflicts with defaults rejected"); settings.Shortcuts.Clear(); settings.GlobalNewKey = settings.GlobalToggleKey = "Ctrl+Alt+N"; Throws(() => host.ValidateSettings(settings), "duplicate global shortcuts rejected"); settings.GlobalToggleKey = "invalid shortcut"; Throws(() => host.ValidateSettings(settings), "invalid global shortcut rejected before saving"); settings.GlobalNewKey = settings.GlobalToggleKey = ""; settings.TomorrowHour = 24; Throws(() => host.ValidateSettings(settings), "invalid tomorrow hour rejected before normalization");
+            LayoutTests(host, manager, first);
+            manager.Close();
+        }
+        private static System.Collections.Generic.IEnumerable<DependencyObject> Descendants(DependencyObject root)
+        {
+            yield return root;
+            foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>()) foreach (var descendant in Descendants(child)) yield return descendant;
+        }
+        private static FrameworkElement Layout(Window window, double width, double height, string name)
+        {
+            var root = (FrameworkElement)window.Content; window.Content = null;
+            root.Measure(new Size(width, height)); root.Arrange(new Rect(0, 0, width, height)); root.UpdateLayout();
+            if (auditDirectory != null)
+            {
+                Directory.CreateDirectory(auditDirectory); var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)width, (int)height, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                var drawing = new System.Windows.Media.DrawingVisual(); using (var dc = drawing.RenderOpen()) dc.DrawRectangle(System.Windows.Media.Brushes.White, null, new Rect(0, 0, width, height)); bitmap.Render(drawing); bitmap.Render(root);
+                var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); using (var file = File.Create(Path.Combine(auditDirectory, name + ".png"))) encoder.Save(file);
+            }
+            window.Content = root; return root;
+        }
+        private static void LayoutTests(AppHost host, ManagerWindow manager, Note note)
+        {
+            var categories = Field<System.Windows.Controls.ListBox>(manager, "categories"); var preview = Field<System.Windows.Controls.ContentControl>(manager, "preview"); var notes = Field<System.Windows.Controls.ListBox>(manager, "notes");
+            host.Library.Move(note, NoteState.Stored); categories.SelectedIndex = 8; manager.Refresh(); notes.SelectedItem = note;
+            Layout(manager, 764, 380, "manager-minimum"); Check(preview.ActualWidth >= 200 && notes.ActualWidth >= 200, "manager minimum size keeps list and preview usable");
+            Layout(manager, 1034, 640, "manager-default"); Check(preview.ActualWidth > 300, "manager preview grows with window");
+            var reminder = new ScheduleWindow(host, note, true, true); var controls = Descendants((DependencyObject)reminder.Content).ToArray(); var combos = controls.OfType<System.Windows.Controls.ComboBox>().ToArray();
+            combos[0].SelectedIndex = 1; var relativeMinutes = controls.OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c).StartsWith("分钟数")); var time = controls.OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c) == "时间"); Check(((FrameworkElement)time.Parent).Visibility == Visibility.Collapsed && ((FrameworkElement)relativeMinutes.Parent).Visibility == Visibility.Visible, "relative reminder uses independent minute input");
+            combos[1].SelectedIndex = 5; Layout(reminder, 464, 370, "reminder-interval"); var visibleTextFields = controls.OfType<System.Windows.Controls.TextBox>().Where(c => ((FrameworkElement)c.Parent).Visibility == Visibility.Visible).ToArray(); Check(visibleTextFields.Contains(relativeMinutes), "minute field remains present for interval recurrence");
+            var day = controls.OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c).StartsWith("日（")); var interval = controls.OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c).StartsWith("间隔数量")); Check(((FrameworkElement)day.Parent).Visibility == Visibility.Collapsed && ((FrameworkElement)interval.Parent).Visibility == Visibility.Visible, "recurrence only displays relevant parameters");
+            var reminderButtons = controls.OfType<System.Windows.Controls.Button>().ToArray(); var cancel = reminderButtons.Single(c => c.Content.ToString() == "取消"); Check(cancel.IsCancel && reminderButtons.Single(c => c.Content.ToString() == "确定").IsDefault && cancel.TranslatePoint(new Point(), (UIElement)reminder.Content).Y + cancel.ActualHeight <= 370, "reminder buttons stay reachable in short window");
+            var scheduled = host.Library.Create(); var simpleReminder = new ScheduleWindow(host, scheduled, true, false); var simpleControls = Descendants((DependencyObject)simpleReminder.Content).ToArray(); simpleControls.OfType<System.Windows.Controls.ComboBox>().Single().SelectedIndex = 1;
+            simpleControls.OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c).StartsWith("分钟数")).Text = "15";
+            var before = DateTime.UtcNow; simpleControls.OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "确定").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); Check(scheduled.State == NoteState.Sleeping && scheduled.WakeUtc >= before.AddMinutes(15) && scheduled.WakeUtc <= DateTime.UtcNow.AddMinutes(15), "relative reminder commits correct future wake time");
+            var clearSleep = new ScheduleWindow(host, scheduled, true, false); Descendants((DependencyObject)clearSleep.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "清除").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); Check(scheduled.State == NoteState.Desktop && scheduled.WakeUtc == null, "clearing sleep restores desktop state");
+            var untouched = new ScheduleWindow(host, scheduled, true, false); Descendants((DependencyObject)untouched.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "取消").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); Check(scheduled.State == NoteState.Desktop && scheduled.WakeUtc == null, "cancel reminder leaves note unchanged");
+            var transferFile = host.Library.Catalog.Settings.TransferFile; host.Library.Catalog.Settings.TransferFile = ""; var configuration = new SettingsWindow(host); host.Library.Catalog.Settings.TransferFile = transferFile; var tabs = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TabControl>().Single();
+            for (int i = 0; i < tabs.Items.Count; i++) { tabs.SelectedIndex = i; Layout(configuration, 524, 320, "settings-" + i); }
+            Check(Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "取消").IsCancel, "settings supports Escape cancel");
+            foreach (var kind in new[] { "folders", "friends", "tags" }) { var collection = new CollectionsWindow(host, kind); Layout(collection, 444, 280, "collection-" + kind); Check(Descendants((DependencyObject)collection.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "关闭").IsCancel, "collection keyboard close " + kind); collection.Close(); }
+            var attachment = new AttachWindow(host, note); Descendants((DependencyObject)attachment.Content).OfType<System.Windows.Controls.ListBox>().Single().ItemsSource = new[] { new WindowInfo { Title = "Sample document — Editor", Class = "SampleEditor" } }; Layout(attachment, 524, 360, "attachment"); Check(Descendants((DependencyObject)attachment.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "确定").IsDefault, "attachment supports Enter confirm");
+            for (int category = 0; category <= 10; category++) { categories.SelectedIndex = category; Layout(manager, 764, 380, "manager-category-" + category); Check(notes.ActualWidth >= 200 && preview.ActualWidth >= 200, "minimum manager panes in category " + category); }
+            var noteWindow = host.Windows.Values.First(w => w.TextEditor != null); noteWindow.TextEditor.InsertText("Sample note\n☐ Task one\n☑ Task two"); Layout(noteWindow, 260, 190, "note-text"); Check(noteWindow.TextEditor.ActualHeight > 100, "text note keeps editable body below title"); noteWindow.ToggleRoll(); Layout(noteWindow, 260, 24, "note-rolled"); noteWindow.ToggleRoll();
+            var imageWindow = host.Windows.Values.First(w => w.ImageEditor != null); Layout(imageWindow, 260, 190, "note-image"); Check(imageWindow.ImageEditor.ActualWidth >= 250, "image note keeps canvas scrollable");
+            var stack = new StackWindow(host, new NoteStack { Name = "Sample stack with a long title that must be trimmed" }); stack.Refresh(); Layout(stack, 180, 44, "stack"); stack.Close();
+            var backupFile = Path.Combine(Path.GetDirectoryName(host.Library.Repository.FilePath), "layout-backup.db"); host.Library.Repository.Backup(backupFile); var backup = new BackupBrowserWindow(host, backupFile); Layout(backup, 444, 280, "backup"); Check(Descendants((DependencyObject)backup.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "取消").IsCancel, "backup browser supports Escape cancel"); backup.Close();
+            reminder.Close(); configuration.Close(); attachment.Close();
         }
     }
 }

@@ -17,29 +17,35 @@ namespace DeskPins.App
         private readonly Stack<BitmapSource> undo = new Stack<BitmapSource>(), redo = new Stack<BitmapSource>();
         private Point start, last;
         private bool drawing;
+        private BitmapSource strokeOriginal;
+        private Rect previousSelection = Rect.Empty;
         private BitmapSource pasted;
-        public bool Locked;
-        public ImageTool Tool = ImageTool.Pen;
+        private bool locked;
+        private ImageTool tool = ImageTool.Pen;
+        public bool Locked { get { return locked; } set { if (value && !locked) CancelEdit(); locked = value; } }
+        public ImageTool Tool { get { return tool; } set { if (tool != value) { CancelEdit(); tool = value; InvalidateVisual(); } } }
         public Color PenColor = Colors.Red, BackgroundColor = Color.FromRgb(255, 255, 180);
         public double PenWidth = 3, Scale = 1;
         public int Number = 1;
-        public Rect Selection;
+        public Rect Selection = Rect.Empty;
         public event Action Changed;
         public BitmapSource Image { get { return image; } }
         public ImageEditor()
         {
             Focusable = true; Cursor = Cursors.Cross;
-            PreviewKeyDown += (s, e) => { if (e.Key == Key.Escape) { drawing = false; pasted = null; ReleaseMouseCapture(); InvalidateVisual(); e.Handled = true; } };
+            PreviewKeyDown += (s, e) => { if (e.Key == Key.Escape) { CancelEdit(); e.Handled = true; } };
+            LostMouseCapture += (s, e) => { if (drawing) CancelEdit(); };
             MouseLeftButtonDown += Down; MouseMove += Move; MouseLeftButtonUp += Up;
             MouseWheel += (s, e) => { if ((Keyboard.Modifiers & ModifierKeys.Control) != 0) Scale = Math.Max(.1, Math.Min(4, Scale * (e.Delta > 0 ? 1.1 : .9))); else PenWidth = Math.Max(1, Math.Min(80, PenWidth + (e.Delta > 0 ? 1 : -1))); InvalidateMeasure(); InvalidateVisual(); e.Handled = true; };
         }
-        public void Read(byte[] bytes) { if (bytes != null && bytes.Length > 0) { using (var s = new MemoryStream(bytes)) { var decoder = BitmapDecoder.Create(s, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad); image = new FormatConvertedBitmap(decoder.Frames[0], PixelFormats.Bgra32, null, 0); image.Freeze(); } } else Blank(250, 160); InvalidateMeasure(); InvalidateVisual(); }
+        public void Read(byte[] bytes) { CancelEdit(); undo.Clear(); redo.Clear(); Selection = Rect.Empty; if (bytes != null && bytes.Length > 0) { using (var s = new MemoryStream(bytes)) { var decoder = BitmapDecoder.Create(s, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad); image = new FormatConvertedBitmap(decoder.Frames[0], PixelFormats.Bgra32, null, 0); image.Freeze(); } } else Blank(250, 160); InvalidateMeasure(); InvalidateVisual(); }
+        public void CancelEdit() { if (drawing) { if (strokeOriginal != null) image = strokeOriginal; Selection = previousSelection; } drawing = false; strokeOriginal = null; pasted = null; ReleaseMouseCapture(); InvalidateVisual(); }
         public void Blank(int width, int height) { var pixels = new byte[width * height * 4]; for (int i = 0; i < pixels.Length; i += 4) { pixels[i] = BackgroundColor.B; pixels[i + 1] = BackgroundColor.G; pixels[i + 2] = BackgroundColor.R; pixels[i + 3] = 255; } image = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, width * 4); image.Freeze(); }
         public byte[] Bytes() { using (var s = new MemoryStream()) { var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(image)); encoder.Save(s); return s.ToArray(); } }
         public void Replace(BitmapSource source) { if (Locked || source == null) return; Remember(); image = new FormatConvertedBitmap(source, PixelFormats.Bgra32, null, 0); image.Freeze(); Selection = Rect.Empty; Notify(); }
         public void PasteInto(BitmapSource source) { if (Locked || source == null) return; pasted = source; Focus(); InvalidateVisual(); }
         public void AddBorder(int width = 3) { if (Locked) return; Remember(); var original = image; Blank(image.PixelWidth + width * 2, image.PixelHeight + width * 2); Draw(d => d.DrawImage(original, new Point(width, width))); }
-        public void Undo(bool forward = false) { if (Locked) return; var from = forward ? redo : undo; var to = forward ? undo : redo; if (from.Count == 0) return; to.Push(image); image = from.Pop(); Notify(); }
+        public void Undo(bool forward = false) { if (Locked) return; CancelEdit(); var from = forward ? redo : undo; var to = forward ? undo : redo; if (from.Count == 0) return; to.Push(image); image = from.Pop(); Selection = Rect.Empty; Notify(); }
         public void Crop() { if (Locked || Selection.IsEmpty || Selection.Width < 1 || Selection.Height < 1) return; Remember(); image = new CroppedBitmap(image, new Int32Rect((int)Selection.X, (int)Selection.Y, Math.Min((int)Selection.Width, image.PixelWidth - (int)Selection.X), Math.Min((int)Selection.Height, image.PixelHeight - (int)Selection.Y))); image.Freeze(); Selection = Rect.Empty; Notify(); }
         public void Transform(string action)
         {
@@ -67,18 +73,26 @@ namespace DeskPins.App
             if (pasted != null) d.DrawImage(pasted, new Rect(last.X * Scale, last.Y * Scale, pasted.PixelWidth * Scale, pasted.PixelHeight * Scale));
             if (drawing && Tool != ImageTool.Pen && Tool != ImageTool.Erase) { d.PushTransform(new ScaleTransform(Scale, Scale)); Shape(d, start, last); d.Pop(); }
         }
-        private Point Position(MouseEventArgs e) { var p = e.GetPosition(this); return new Point(Math.Max(0, Math.Min(image.PixelWidth - 1, p.X / Scale)), Math.Max(0, Math.Min(image.PixelHeight - 1, p.Y / Scale))); }
+        private Point ClampPosition(Point p) { return new Point(Math.Max(0, Math.Min(image.PixelWidth - (Tool == ImageTool.Select ? 0 : 1), p.X)), Math.Max(0, Math.Min(image.PixelHeight - (Tool == ImageTool.Select ? 0 : 1), p.Y))); }
+        private Point Position(MouseEventArgs e) { var p = e.GetPosition(this); return ClampPosition(new Point(p.X / Scale, p.Y / Scale)); }
         private void Down(object s, MouseButtonEventArgs e)
         {
             Focus(); if (Locked) return; start = last = Position(e); if (pasted != null) { Remember(); var source = pasted; pasted = null; Draw(d => d.DrawImage(source, start)); return; }
             if (Tool == ImageTool.Eyedropper) { byte[] p = new byte[4]; image.CopyPixels(new Int32Rect((int)start.X, (int)start.Y, 1, 1), p, 4, 0); PenColor = Color.FromArgb(p[3], p[2], p[1], p[0]); return; }
-            Remember(); if (Tool == ImageTool.Fill) { Flood(start); return; }
-            if (Tool == ImageTool.Text) { var text = Ui.Ask("图片文字", "输入文字"); if (text != null) Draw(d => d.DrawText(text, Math.Max(10, PenWidth * 5), new SolidColorBrush(PenColor), start)); return; }
-            if (Tool == ImageTool.Number) { Draw(d => { d.DrawEllipse(new SolidColorBrush(PenColor), null, start, Math.Max(10, PenWidth * 4), Math.Max(10, PenWidth * 4)); d.DrawText((Number++).ToString(), Math.Max(10, PenWidth * 5), Brushes.White, new Point(start.X - PenWidth * 2, start.Y - PenWidth * 3)); }); return; }
-            drawing = true; CaptureMouse(); if (Tool == ImageTool.Select) Selection = Rect.Empty;
+            if (Tool == ImageTool.Fill) { Remember(); Flood(start); return; }
+            if (Tool == ImageTool.Text) { var text = Ui.Ask("图片文字", "输入文字"); if (!string.IsNullOrEmpty(text)) { Remember(); Draw(d => d.DrawText(text, Math.Max(10, PenWidth * 5), new SolidColorBrush(PenColor), start)); } return; }
+            if (Tool == ImageTool.Number) { Remember(); Draw(d => { d.DrawEllipse(new SolidColorBrush(PenColor), null, start, Math.Max(10, PenWidth * 4), Math.Max(10, PenWidth * 4)); d.DrawText((Number++).ToString(), Math.Max(10, PenWidth * 5), Brushes.White, new Point(start.X - PenWidth * 2, start.Y - PenWidth * 3)); }); return; }
+            BeginStroke(start); CaptureMouse();
         }
-        private void Move(object s, MouseEventArgs e) { if (pasted != null) { last = Position(e); InvalidateVisual(); return; } if (!drawing) return; var p = Position(e); if (Tool == ImageTool.Pen || Tool == ImageTool.Erase) { var a = last; Draw(d => d.DrawLine(new Pen(new SolidColorBrush(Tool == ImageTool.Erase ? BackgroundColor : PenColor), PenWidth), a, p), false); } last = p; if (Tool == ImageTool.Select) Selection = new Rect(start, last); InvalidateVisual(); }
-        private void Up(object s, MouseButtonEventArgs e) { if (!drawing) return; last = Position(e); if (Tool != ImageTool.Select && Tool != ImageTool.Pen && Tool != ImageTool.Erase) Draw(d => Shape(d, start, last), false); drawing = false; ReleaseMouseCapture(); Notify(); }
+        public void BeginStroke(Point point)
+        {
+            if (Locked) return; CancelEdit(); start = last = ClampPosition(point); strokeOriginal = image; previousSelection = Selection; drawing = true; if (Tool == ImageTool.Select) Selection = Rect.Empty;
+            else if (Tool == ImageTool.Pen || Tool == ImageTool.Erase) Draw(d => d.DrawEllipse(new SolidColorBrush(Tool == ImageTool.Erase ? BackgroundColor : PenColor), null, start, PenWidth / 2, PenWidth / 2), false);
+        }
+        private void Move(object s, MouseEventArgs e) { if (pasted != null) { last = Position(e); InvalidateVisual(); return; } ContinueStroke(Position(e)); }
+        public void ContinueStroke(Point point) { if (!drawing) return; var p = ClampPosition(point); if (Tool == ImageTool.Pen || Tool == ImageTool.Erase) { var a = last; Draw(d => d.DrawLine(new Pen(new SolidColorBrush(Tool == ImageTool.Erase ? BackgroundColor : PenColor), PenWidth), a, p), false); } last = p; if (Tool == ImageTool.Select) Selection = new Rect(start, last); InvalidateVisual(); }
+        private void Up(object s, MouseButtonEventArgs e) { CommitStroke(Position(e)); }
+        public void CommitStroke(Point point) { if (!drawing) return; ContinueStroke(point); if (Tool != ImageTool.Select) { Remember(strokeOriginal); if (Tool != ImageTool.Pen && Tool != ImageTool.Erase) Draw(d => Shape(d, start, last), false); } bool changed = Tool != ImageTool.Select; drawing = false; strokeOriginal = null; ReleaseMouseCapture(); if (changed) Notify(); else InvalidateVisual(); }
         private void Shape(DrawingContext d, Point a, Point b)
         {
             var pen = new Pen(new SolidColorBrush(PenColor), PenWidth); bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0; bool fill = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
@@ -98,7 +112,7 @@ namespace DeskPins.App
             image = BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgra32, null, pixels, w * 4); image.Freeze(); Notify();
         }
         private void Draw(Action<RasterCanvas> action, bool notify = true) { using (var raster = new RasterCanvas(image)) { action(raster); image = raster.Result(); } if (notify) Notify(); else InvalidateVisual(); }
-        private void Remember() { undo.Push(image); redo.Clear(); var all = undo.ToArray(); long bytes = 0; int keep = 0; for (int i = 0; i < all.Length && i < 40; i++) { bytes += (long)all[i].PixelWidth * all[i].PixelHeight * 4; if (i > 0 && bytes > 64L * 1024 * 1024) break; keep++; } undo.Clear(); for (int i = keep - 1; i >= 0; i--) undo.Push(all[i]); }
+        private void Remember(BitmapSource before = null) { undo.Push(before ?? image); redo.Clear(); var all = undo.ToArray(); long bytes = 0; int keep = 0; for (int i = 0; i < all.Length && i < 40; i++) { bytes += (long)all[i].PixelWidth * all[i].PixelHeight * 4; if (i > 0 && bytes > 64L * 1024 * 1024) break; keep++; } undo.Clear(); for (int i = keep - 1; i >= 0; i--) undo.Push(all[i]); }
         private void Notify() { InvalidateMeasure(); InvalidateVisual(); var changed = Changed; if (changed != null) changed(); }
     }
 }

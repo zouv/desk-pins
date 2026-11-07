@@ -19,7 +19,7 @@ namespace DeskPins.Core
             var start = DateTime.SpecifyKind(rule.StartLocal, DateTimeKind.Unspecified);
             var after = DateTime.SpecifyKind(afterLocal, DateTimeKind.Unspecified);
             DateTime candidate;
-            if (after < start) candidate = start;
+            if (after < start && rule.Kind == RepeatKind.Interval) candidate = start;
             else if (rule.Kind == RepeatKind.Interval)
             {
                 double seconds = Math.Max(1, rule.Interval) * (rule.IntervalUnit == 0 ? 60d : rule.IntervalUnit == 1 ? 3600d : rule.IntervalUnit == 2 ? 86400d : 604800d);
@@ -28,6 +28,7 @@ namespace DeskPins.Core
             }
             else
             {
+                if (after < start) after = start.AddTicks(-1);
                 candidate = after.Date.Add(start.TimeOfDay);
                 if (candidate <= after) candidate = candidate.AddDays(1);
                 if (rule.Kind == RepeatKind.Daily) { }
