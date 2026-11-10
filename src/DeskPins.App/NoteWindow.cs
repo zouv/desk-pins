@@ -26,7 +26,7 @@ namespace DeskPins.App
         private string activeSkin = "";
         private readonly DispatcherTimer saveTimer;
         private DispatcherTimer alarmTimer;
-        private bool internalChange, closing, movingGroup, alarming, dirty;
+        private bool internalChange, closing, movingGroup, alarming, dirty, resizing;
         private double oldLeft, oldTop;
         private string lastFind = "";
         private int alarmStep;
@@ -49,10 +49,13 @@ namespace DeskPins.App
             Activated += (s, e) => { ApplyAppearance(); }; Deactivated += (s, e) => { Flush(); ApplyAppearance(); };
             LocationChanged += Location; SizeChanged += (s, e) => { if (internalChange || Note.Rolled) return; Note.Width = Width; Note.Height = Height; Note.ExpandedHeight = Height; QueueSave(); };
             PreviewKeyDown += HandleKeyDown;
-            PreviewMouseLeftButtonDown += (s, e) => { if (alarming) StopAlarm(false); ResizeAt(e); };
+            PreviewMouseLeftButtonDown += (s, e) => { if (alarming) StopAlarm(false); };
             PreviewMouseWheel += (s, e) => { if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return; if (TextEditor != null) TextEditor.Scale(e.Delta > 0 ? 1.1 : .9); else { ImageEditor.Scale = Math.Max(.1, Math.Min(4, ImageEditor.Scale * (e.Delta > 0 ? 1.1 : .9))); ImageEditor.InvalidateMeasure(); } QueueSave(); e.Handled = true; };
             Closing += ClosingWindow; Closed += (s, e) => { saveTimer.Stop(); if (alarmTimer != null) alarmTimer.Stop(); };
             AllowDrop = true; Drop += DropFiles; ApplyModel();
+            WindowResize.Attach(this, 100, 40, () => !Note.Rolled,
+                () => { resizing = true; if (alarming) StopAlarm(false); Flush(); },
+                () => { resizing = false; oldLeft = Left; oldTop = Top; Note.Left = Left; Note.Top = Top; Note.Width = Width; if (!Note.Rolled) Note.Height = Note.ExpandedHeight = Height; QueueSave(); Flush(); });
         }
         private void CreateEditor()
         {
@@ -120,14 +123,12 @@ namespace DeskPins.App
         }
         private void Location(object sender, EventArgs e)
         {
-            if (internalChange || movingGroup) return; double dx = Left - oldLeft, dy = Top - oldTop; oldLeft = Left; oldTop = Top;
+            if (internalChange || movingGroup) return;
+            if (resizing) { oldLeft = Left; oldTop = Top; Note.Left = Left; Note.Top = Top; return; }
+            double dx = Left - oldLeft, dy = Top - oldTop; oldLeft = Left; oldTop = Top;
             Host.MoveSelected(this, dx, dy); Note.Left = Left; Note.Top = Top; QueueSave();
         }
         public void MoveBy(double dx, double dy) { movingGroup = true; Left += dx; Top += dy; oldLeft = Left; oldTop = Top; Note.Left = Left; Note.Top = Top; movingGroup = false; QueueSave(); }
-        private void ResizeAt(MouseButtonEventArgs e)
-        {
-            var p = e.GetPosition(this); bool left = p.X < 5, right = p.X > ActualWidth - 5, top = p.Y < 4, bottom = p.Y > ActualHeight - 4; if (!left && !right && !top && !bottom) return; int hit = left ? (top ? 13 : bottom ? 16 : 10) : right ? (top ? 14 : bottom ? 17 : 11) : top ? 12 : 15; Native.Resize(this, hit); e.Handled = true;
-        }
         private void AutoSize()
         {
             if (Note.Scrollbar || Note.Rolled || TextEditor == null || !IsLoaded) return; var rect = TextEditor.Document.ContentEnd.GetCharacterRect(LogicalDirection.Backward); if (rect.IsEmpty) return; double height = Math.Max(60, Math.Min(SystemParameters.WorkArea.Height - 40, rect.Bottom + 34)); if (Math.Abs(height - Height) < 2) return; double bottom = Top + Height; internalChange = true; Height = height; if (Note.Stand) Top = bottom - height; internalChange = false; Note.Height = Note.ExpandedHeight = height; QueueSave();

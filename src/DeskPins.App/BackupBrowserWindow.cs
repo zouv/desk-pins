@@ -10,7 +10,7 @@ namespace DeskPins.App
     {
         public BackupBrowserWindow(AppHost host, string file)
         {
-            Title = "从备份选择性恢复"; Width = 620; Height = 480; WindowStartupLocation = WindowStartupLocation.CenterScreen; ShowInTaskbar = false;
+            Title = Ui.Text("从备份选择性恢复"); Width = 620; Height = 480; WindowStartupLocation = WindowStartupLocation.CenterScreen; ShowInTaskbar = false;
             Ui.FitDialog(this, 460, 320);
             using (var source = new Sqlite(file, true))
             {

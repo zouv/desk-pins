@@ -1,0 +1,157 @@
+using System.Collections.Generic;
+
+namespace DeskPins.App
+{
+    /// <summary>
+    /// Built-in interface languages. Custom JSON files remain supported by Ui.LoadLanguage.
+    /// Keys are the Chinese source strings used by the WPF UI.
+    /// </summary>
+    public static class Localization
+    {
+        public const string Chinese = "zh-CN";
+        public const string English = "en-US";
+
+        private static readonly Dictionary<string, string> english = new Dictionary<string, string>
+        {
+            // Shell and common actions.
+            {"DeskPins 设置", "DeskPins Settings"}, {"设置", "Settings"}, {"保存", "Save"}, {"取消", "Cancel"}, {"确定", "OK"},
+            {"关闭", "Close"}, {"浏览…", "Browse…"}, {"选择语言文件…", "Choose language file…"}, {"自定义语言文件…", "Custom language file…"},
+            {"应用", "Application"}, {"桌面", "Desktop"}, {"外观", "Appearance"}, {"提醒", "Alerts"}, {"网络", "Network"}, {"邮件", "Email"}, {"快捷键", "Hotkeys"},
+            {"界面语言", "Language"}, {"切换语言后立即预览；保存后应用到整个应用。", "The interface updates immediately; Save applies the language to the application."},
+            {"内置语言", "Built-in language"}, {"自定义语言文件", "Custom language file"}, {"语言文件", "Language file"},
+            {"快捷键范围", "Shortcut scope"}, {"必须为非负整数。", "must be a non-negative integer."},
+            {"开机启动", "Start with Windows"}, {"默认新建图片便签", "Create image notes by default"},
+            {"传输文件", "Transfer file"}, {"自动备份间隔（小时，0=关闭）", "Automatic backup interval (hours, 0 = off)"},
+            {"Closed 保留天数（0=一直保留）", "Keep closed notes for (days, 0 = forever)"},
+            {"紧凑管理列表", "Compact manager list"}, {"管理列表显示最后修改日期", "Show last modified date in manager"},
+            {"便签 / 屏幕边缘吸附", "Snap notes to screen edges"}, {"编辑时临时不透明", "Opaque while editing"},
+            {"双击标题栏卷起", "Double-click title bar to roll up"},
+            {"样式（0 为新便签默认样式）", "Style (0 is the default for new notes)"}, {"名称", "Name"},
+            {"背景颜色", "Background color"}, {"文本颜色", "Text color"}, {"字体", "Font"},
+            {"字号（WPF 像素）", "Font size (WPF pixels)"}, {"不透明度（10–100）", "Opacity (10–100)"},
+            {"置顶", "Always on top"}, {"选择背景色", "Choose background color"}, {"默认皮肤文件（JSON）", "Default skin file (JSON)"},
+            {"闹钟闪烁边框", "Flash note border on alarm"}, {"闹钟抖动", "Shake note on alarm"},
+            {"循环播放声音", "Loop alarm sound"}, {"避免重复的循环便签", "Prevent duplicate recurring notes"},
+            {"稍后提醒分钟数", "Snooze minutes"}, {"明天唤醒小时（0–23）", "Tomorrow wake hour (0–23)"},
+            {"闹钟 WAV 文件", "Alarm WAV file"}, {"唤醒 WAV 文件", "Wake-up WAV file"},
+            {"启用 TCP 发送 / 接收", "Enable TCP send / receive"}, {"监听端口", "Listen port"},
+            {"使用 DNS 识别发送者", "Resolve sender names with DNS"}, {"联系人列表来源（文件或 HTTP URL）", "Contact list source (file or HTTP URL)"},
+            {"监听只在启用后启动。支持 Stickies #sticky 文本 / RTF / 图片传输格式。", "Listening starts only after it is enabled. Supports Stickies #sticky text / RTF / image transfer format."},
+            {"使用默认邮件客户端打开正文草稿（附件使用 SMTP）", "Open draft in default email client (attachments use SMTP)"},
+            {"启用 SMTP 邮件发送", "Enable SMTP sending"}, {"SMTP 服务器", "SMTP server"}, {"端口", "Port"}, {"启用 TLS", "Enable TLS"},
+            {"用户名", "Username"}, {"密码（留空保留当前值）", "Password (leave blank to keep current)"}, {"发件人地址", "From address"},
+            {"全局快捷键", "Global shortcuts"}, {"应用内快捷键", "In-app shortcuts"},
+            {"全局快捷键在 DeskPins 未聚焦时也生效；应用内快捷键仅在便签窗口获得焦点时生效。", "Global shortcuts also work while DeskPins is not focused; in-app shortcuts work only when a note window has focus."},
+            {"全局快捷键在 DeskPins 未聚焦时也生效。", "Global shortcuts also work while DeskPins is not focused."},
+            {"应用内快捷键仅在便签窗口获得焦点时生效。", "In-app shortcuts work only while a note window has focus."},
+            {"打开 / 关闭快捷键", "Enable or disable shortcut"}, {"按下新的按键组合", "Press a new key combination"},
+            {"快捷键必须包含字母、数字或功能键。", "A shortcut must include a letter, number, or function key."},
+            {"新手势", "New gesture"},
+            {"端口需在 1–65535 范围内。", "Ports must be between 1 and 65535."},
+            {"明天唤醒小时需为 0–23，稍后提醒分钟数需大于零。", "Tomorrow wake hour must be 0–23 and snooze minutes must be positive."},
+            {"便签快捷键重复：", "Duplicate note shortcut: "}, {"两个全局快捷键不能相同。", "Global shortcuts must be different."},
+            {"全局快捷键被其他应用占用，请在设置中修改。", "A global shortcut is used by another application. Choose a different one in Settings."},
+            {"字体名称不能为空。", "Font name cannot be empty."},
+            {"便签尺寸", "Note size"}, {"图片尺寸", "Image size"}, {"图片文字", "Image text"}, {"画笔宽度", "Pen width"},
+            {"查找", "Find"}, {"打印…", "Print…"}, {"编辑", "Edit"}, {"删除", "Delete"}, {"添加", "Add"}, {"替换", "Replace"}, {"清空", "Clear"},
+            {"新建堆叠", "New stack"}, {"新联系人", "New contact"}, {"新增标签", "Add tag"}, {"编辑发送者", "Edit sender"},
+            {"解锁加密存储", "Unlock encrypted storage"}, {"发送便签", "Send note"}, {"删除选中项？便签内容会保留。", "Delete the selected item? Note contents are kept."},
+            {"永久删除选中的便签？", "Delete the selected notes permanently?"},
+            {"用备份替换当前便签？将先保存当前数据备份。", "Replace the current notes with this backup? A backup of the current data will be created first."},
+            {"未找到。", "Not found."}, {"永久删除", "Delete permanently"}, {"此操作无法恢复。", "This cannot be undone."},
+
+            // Shortcut action labels.
+            {"粘贴", "Paste"}, {"复制", "Copy"}, {"剪切", "Cut"}, {"切换到下一张便签", "Next note"},
+            {"切换到上一张便签", "Previous note"}, {"新建便签", "New note"}, {"新建并沿用当前颜色", "New note with current color"},
+            {"关闭便签（可恢复）", "Close note (recoverable)"}, {"永久删除便签", "Delete note permanently"},
+            {"切换置顶", "Toggle always on top"}, {"修改标题", "Edit title"}, {"锁定内容", "Lock content"},
+            {"卷起 / 展开", "Roll up / expand"}, {"设置闹钟", "Set alarm"}, {"发送到休眠", "Send to sleep"},
+            {"设置重复提醒", "Set recurring reminder"}, {"明天唤醒", "Wake tomorrow"}, {"管理便签", "Manage notes"},
+            {"应用设置", "Settings"}, {"联系人", "Contacts"}, {"另存为", "Save as"}, {"立即保存全部便签", "Save all notes now"},
+            {"打印", "Print"}, {"查找文本", "Find text"}, {"查找下一个", "Find next"}, {"粘贴纯文本", "Paste as plain text"},
+            {"复制纯文本", "Copy as plain text"}, {"将空便签转换为图片", "Convert empty note to image"},
+            {"粗体", "Bold"}, {"斜体", "Italic"}, {"下划线", "Underline"}, {"删除线", "Strikethrough"}, {"项目符号", "Bullets"},
+            {"插入复选框", "Insert checkbox"}, {"插入链接", "Insert link"}, {"插入日期时间", "Insert date and time"},
+            {"插入水平线", "Insert horizontal rule"}, {"撤销", "Undo"}, {"重做", "Redo"}, {"设置便签尺寸", "Set note size"},
+            {"根据文本调整右侧宽度", "Fit width to text (right)"}, {"设置皮肤", "Set skin"}, {"发送到传输文件", "Send to transfer file"},
+            {"编辑发送来源", "Edit sender"}, {"查看活动日志", "View activity log"}, {"从便签添加联系人", "Add contact from note"},
+            {"发送给多个联系人", "Send to multiple contacts"}, {"回复发送者", "Reply to sender"}, {"以秘密便签回复", "Reply with secret note"},
+            {"引用全部文本", "Quote all text"}, {"根据文本调整左侧宽度", "Fit width to text (left)"}, {"同步联系人列表", "Sync contact list"},
+            {"编辑联系人来源", "Edit contact source"}, {"复制格式", "Copy formatting"}, {"粘贴格式", "Paste formatting"},
+            {"恢复默认皮肤", "Reset skin"}, {"显示 / 隐藏全部便签", "Show / hide all notes"},
+
+            // Note and manager menus.
+            {"设置标题…", "Set title…"}, {"设置颜色…", "Set color…"}, {"设为样式", "Apply style"}, {"卷起", "Roll up"},
+            {"不透明度", "Opacity"}, {"Ghost / 点击穿透", "Ghost / click-through"}, {"秘密便签", "Secret note"},
+            {"滚动模式", "Scroll mode"}, {"底部固定（Stand）", "Stand"}, {"取消 Solo", "Stop solo"},
+            {"Solo / 仅显示此便签", "Solo / show only this note"}, {"闹钟…", "Alarm…"}, {"休眠", "Sleep"},
+            {"明天", "Tomorrow"}, {"自定义…", "Custom…"}, {"重复…", "Repeat…"},
+            {"附着到窗口…", "Attach to window…"}, {"修改附着 / 分离…", "Change attachment / detach…"}, {"标签…", "Tags…"},
+            {"存入文件夹", "Store in folder"}, {"根目录", "Root"}, {"放入堆叠", "Add to stack"}, {"移出堆叠", "Remove from stack"},
+            {"新建堆叠…", "New stack…"}, {"发送到", "Send to"}, {"地址 / 多人…", "Address / multiple…"}, {"复制便签", "Copy note"},
+            {"保存为…", "Save as…"}, {"复制到传输文件", "Copy to transfer file"}, {"设置皮肤…", "Set skin…"},
+            {"关闭（可恢复）", "Close (recoverable)"}, {"粘贴为纯文本", "Paste as plain text"}, {"字体…", "Font…"},
+            {"编号", "Numbering"}, {"左对齐", "Align left"}, {"居中", "Center"}, {"右对齐", "Align right"},
+            {"从左到右", "Left to right"}, {"从右到左", "Right to left"}, {"插入链接…", "Insert link…"}, {"查找…", "Find…"},
+            {"选择", "Select"}, {"画笔", "Pen"}, {"文字", "Text"}, {"橡皮擦", "Eraser"}, {"直线", "Line"}, {"箭头", "Arrow"},
+            {"矩形", "Rectangle"}, {"填充", "Fill"}, {"椭圆", "Ellipse"}, {"取色", "Color picker"}, {"画笔颜色…", "Pen color…"},
+            {"画笔宽度…", "Pen width…"}, {"载入图片…", "Load image…"}, {"粘贴图片", "Paste image"}, {"复制选区", "Copy selection"},
+            {"粘贴到图片内", "Paste into image"}, {"增加边框", "Add border"}, {"裁剪到选区", "Crop to selection"},
+            {"调整图片大小…", "Resize image…"}, {"向左旋转", "Rotate left"}, {"向右旋转", "Rotate right"},
+            {"水平镜像", "Mirror horizontally"}, {"垂直翻转", "Flip vertically"}, {"灰度", "Grayscale"}, {"模糊", "Blur"},
+            {"抖动", "Jitter"},
+
+            // Management window.
+            {"新建", "New"}, {"恢复到桌面", "Restore to desktop"}, {"收藏", "Store"}, {"文件夹…", "Folders…"},
+            {"联系人…", "Contacts…"}, {"解锁 / 锁定", "Unlock / lock"}, {"设置…", "Settings…"}, {"查找：", "Find:"},
+            {"搜索", "Search"}, {"修改时间 ↓", "Modified ↓"}, {"创建时间 ↓", "Created ↓"}, {"标题 A–Z", "Title A–Z"},
+            {"提醒时间 ↑", "Reminder ↑"}, {"张便签", "notes"}, {"首页", "Home"}, {"堆叠", "Stacks"}, {"附着", "Attachments"},
+            {"休眠中", "Sleeping"}, {"重复提醒", "Recurring"}, {"日历", "Calendar"}, {"已关闭", "Closed"}, {"已收藏", "Stored"},
+            {"DeskPins · 管理便签", "DeskPins · Manage notes"},
+            {"搜索结果", "Search results"}, {"此便签已加密", "This note is encrypted"}, {"解锁", "Unlock"},
+            {"恢复 / 唤醒", "Restore / wake"}, {"Ghost 开启", "Ghost on"}, {"Ghost 关闭", "Ghost off"},
+            {"分离附着", "Detach"}, {"导出…", "Export…"}, {"属性…", "Properties…"}, {"永久删除…", "Delete permanently…"},
+            {"使用此文件夹", "Use this folder"},
+            {"DeskPins · 桌钉\n\n", "DeskPins\n\n"},
+            {"双击桌面便签即可定位，关闭的便签可恢复。", "Double-click a desktop note to locate it. Closed notes can be restored."},
+
+            // Collections, reminders, attachments and backups.
+            {"收藏文件夹", "Stored folders"}, {"标签", "Tags"}, {"新建分隔线", "New separator"}, {"DeskPins 堆叠", "DeskPins stack"},
+            {"同步联系人", "Sync contacts"}, {"上移", "Move up"}, {"切换加密", "Toggle encryption"},
+            {"父文件夹", "Parent folder"}, {"文件夹不能循环嵌套。", "Folders cannot be nested in a loop."},
+            {"堆叠名称", "Stack name"}, {"重命名…", "Rename…"}, {"颜色…", "Color…"}, {"打开堆叠（保留便签）", "Close stack (keep notes)"},
+            {"关闭堆叠（保留便签）", "Close stack (keep notes)"}, {"关闭堆叠内便签", "Close notes in stack"}, {"展开 / 收拢", "Expand / collapse"},
+            {"提醒设置", "Reminder"}, {"时间", "Time"}, {"分钟数", "Minutes"}, {"清除", "Clear"}, {"稍后提醒", "Snooze"},
+            {"发送便签到休眠", "Send note to sleep"}, {"时间方式", "Time mode"}, {"指定日期时间", "Specific date and time"},
+            {"从现在开始（分钟）", "From now (minutes)"}, {"开始日期", "Start date"}, {"日期", "Date"}, {"分钟数（大于 0）", "Minutes (greater than 0)"},
+            {"重复方式", "Repeat mode"}, {"每天", "Daily"}, {"每周", "Weekly"}, {"每月指定日", "Monthly date"},
+            {"每月第几个星期", "Monthly weekday"}, {"每年", "Yearly"}, {"固定间隔", "Fixed interval"}, {"选择星期", "Select weekdays"},
+            {"周一", "Mon"}, {"周二", "Tue"}, {"周三", "Wed"}, {"周四", "Thu"}, {"周五", "Fri"}, {"周六", "Sat"}, {"周日", "Sun"},
+            {"日（1–31）", "Day (1–31)"}, {"月（1–12）", "Month (1–12)"}, {"第几个（1–5，-1 表示最后）", "Position (1–5, -1 = last)"},
+            {"星期", "Weekday"}, {"间隔数量（正整数）", "Interval count (positive integer)"}, {"间隔单位", "Interval unit"},
+            {"分钟", "minutes"}, {"小时", "hours"}, {"天", "days"}, {"周", "weeks"}, {"结束日期（留空表示持续）", "End date (leave blank to continue)"},
+            {"唤醒时置顶", "Always on top when waking"}, {"唤醒时触发闹钟", "Trigger alarm on wake"}, {"唤醒时播放声音", "Play sound on wake"},
+            {"附着到窗口", "Attach to window"}, {"相对于目标窗口定位", "Position relative to target window"},
+            {"窗口类名（支持 * 和 ?）", "Window class (supports * and ?)"}, {"分离", "Detach"}, {"刷新", "Refresh"},
+            {"从备份选择性恢复", "Selective restore from backup"}, {"恢复选中便签", "Restore selected notes"},
+            {"DeskPins 屏幕截取", "DeskPins screen capture"},
+            {"停止闹钟", "Stop alarm"}, {"设置标题", "Set title"}, {"便签标题", "Note title"},
+            {"附着窗口", "Attached window"}, {"窗口标题（支持 * 和 ?）", "Window title (supports * and ?)"},
+            {"类名（支持 * 和 ?）", "Class name (supports * and ?)"}, {"相对位置", "Relative position"},
+            {"选择性恢复", "Selective restore"}, {"备份", "Backup"}, {"恢复", "Restore"},
+
+            // Tray and app commands.
+            {"从剪贴板新建", "New from clipboard"}, {"新建图片便签", "New image note"}, {"从屏幕截取新建…", "New from screen capture…"},
+            {"显示 / 隐藏全部", "Show / hide all"}, {"前置所有便签", "Bring all notes forward"},
+            {"打开设置", "Open settings"}, {"导入便签…", "Import notes…"}, {"从传输文件导入", "Import from transfer file"},
+            {"导入 Stickies v10 数据库…", "Import Stickies v10 database…"}, {"备份…", "Backup…"}, {"恢复全部…", "Restore all…"},
+            {"合并备份…", "Merge backup…"}, {"选择性恢复…", "Selective restore…"}, {"救回屏幕外便签", "Recover off-screen notes"},
+            {"关于 DeskPins", "About DeskPins"}, {"退出", "Exit"}, {"便签已隐藏", "notes hidden"}
+        };
+
+        public static Dictionary<string, string> Dictionary(string language)
+        {
+            return language == English ? english : null;
+        }
+    }
+}

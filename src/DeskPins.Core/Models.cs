@@ -75,7 +75,7 @@ namespace DeskPins.Core
     public sealed class NoteStack
     {
         [DataMember] public string Id = Guid.NewGuid().ToString("N"), Name = "新堆叠", Color = "#FFFFB4";
-        [DataMember] public double Left = 100, Top = 100;
+        [DataMember] public double Left = 100, Top = 100, Width = 180, Height = 44;
         [DataMember] public bool Expanded, Topmost;
     }
     [DataContract]
@@ -113,6 +113,7 @@ namespace DeskPins.Core
         [DataMember] public NoteKind DefaultKind;
         [DataMember] public List<NoteStyle> Styles = new List<NoteStyle>();
         [DataMember] public Dictionary<string, string> Shortcuts = new Dictionary<string, string>();
+        [DataMember] public Dictionary<string, string> DisabledShortcuts = new Dictionary<string, string>();
         [DataMember] public bool ManagerModifiedDates;
         [DataMember] public bool EmailViaClient;
         [DataMember] public Dictionary<int, int> ManagerOrders = new Dictionary<int, int>();
@@ -122,7 +123,9 @@ namespace DeskPins.Core
             if (Styles == null) Styles = new List<NoteStyle>();
             while (Styles.Count < 10) Styles.Add(new NoteStyle { Name = Styles.Count == 0 ? "默认" : "样式 " + Styles.Count });
             if (Shortcuts == null) Shortcuts = new Dictionary<string, string>();
+            if (DisabledShortcuts == null) DisabledShortcuts = new Dictionary<string, string>();
             if (ManagerOrders == null) ManagerOrders = new Dictionary<int, int>();
+            if (string.IsNullOrWhiteSpace(Language)) Language = "zh-CN";
             NetworkPort = Math.Max(1, Math.Min(65535, NetworkPort)); SnoozeMinutes = Math.Max(1, SnoozeMinutes);
             TomorrowHour = Math.Max(0, Math.Min(23, TomorrowHour));
         }
@@ -135,7 +138,7 @@ namespace DeskPins.Core
         [DataMember] public List<NoteStack> Stacks = new List<NoteStack>();
         [DataMember] public List<Tag> Tags = new List<Tag>();
         [DataMember] public List<Friend> Friends = new List<Friend>();
-        public void Normalize() { if (Settings == null) Settings = new Settings(); Settings.Normalize(); if (Folders == null) Folders = new List<Folder>(); if (Stacks == null) Stacks = new List<NoteStack>(); if (Tags == null) Tags = new List<Tag>(); if (Friends == null) Friends = new List<Friend>(); }
+        public void Normalize() { if (Settings == null) Settings = new Settings(); Settings.Normalize(); if (Folders == null) Folders = new List<Folder>(); if (Stacks == null) Stacks = new List<NoteStack>(); if (Tags == null) Tags = new List<Tag>(); if (Friends == null) Friends = new List<Friend>(); foreach (var stack in Stacks) { if (stack.Width < 100) stack.Width = 180; if (stack.Height < 32) stack.Height = 44; } }
     }
     public static class Json
     {

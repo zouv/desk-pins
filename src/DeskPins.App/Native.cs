@@ -31,7 +31,6 @@ namespace DeskPins.App
             IntPtr h = new WindowInteropHelper(window).Handle; if (h == IntPtr.Zero) return; long style = GetWindowLongPtr(h, -20).ToInt64(); style = ghost ? style | 0x20L | 0x80000L : style & ~0x20L; if (!ghost && !window.AllowsTransparency && window.Opacity >= 1) style &= ~0x80000L; SetWindowLongPtr(h, -20, new IntPtr(style)); if (ghost) SetLayeredWindowAttributes(h, 0, (byte)(Math.Max(0, Math.Min(1, window.Opacity)) * 255), 2);
         }
         public static void ToolWindow(Window window) { var h = new WindowInteropHelper(window).Handle; long s = GetWindowLongPtr(h, -20).ToInt64(); SetWindowLongPtr(h, -20, new IntPtr((s | 0x80L) & ~0x40000L)); }
-        public static void Resize(Window window, int direction) { ReleaseCapture(); SendMessage(new WindowInteropHelper(window).Handle, 0xA1, new IntPtr(direction), IntPtr.Zero); }
         public static bool RegisterHotkey(IntPtr h, int id, string gesture)
         {
             if (string.IsNullOrWhiteSpace(gesture)) return true;
@@ -52,8 +51,6 @@ namespace DeskPins.App
         [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
         [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr(IntPtr h, int index, IntPtr value);
-        [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
-        [DllImport("user32.dll")] private static extern bool ReleaseCapture();
         [DllImport("user32.dll")] private static extern bool RegisterHotKey(IntPtr h, int id, uint mods, uint key);
         [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr h, int id);
         [DllImport("user32.dll")] public static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr module, WinEventProc proc, uint pid, uint thread, uint flags);

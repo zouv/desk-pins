@@ -10,7 +10,7 @@ namespace DeskPins.App
     {
         public ScheduleWindow(AppHost host, Note note, bool sleep, bool repeat)
         {
-            Title = repeat ? "重复提醒" : sleep ? "发送便签到休眠" : "设置闹钟";
+            Title = Ui.Text(repeat ? "重复提醒" : sleep ? "发送便签到休眠" : "设置闹钟");
             Width = 480; SizeToContent = SizeToContent.Height; ResizeMode = ResizeMode.NoResize;
             WindowStartupLocation = WindowStartupLocation.CenterScreen; ShowInTaskbar = false;
             Ui.FitDialog(this, 460, 220);
@@ -19,7 +19,7 @@ namespace DeskPins.App
             DockPanel.SetDock(buttons, Dock.Bottom); root.Children.Add(buttons);
             var panel = new StackPanel { Margin = new Thickness(16, 6, 16, 6) };
             root.Children.Add(new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
-            var mode = new ComboBox { ItemsSource = new[] { "指定日期时间", "从现在开始（分钟）" }, SelectedIndex = 0 };
+            var mode = new ComboBox { ItemsSource = new[] { Ui.Text("指定日期时间"), Ui.Text("从现在开始（分钟）") }, SelectedIndex = 0 };
             Ui.Field(panel, "时间方式", mode);
             var current = repeat && note.Repeat != null ? note.Repeat.StartLocal : (sleep ? note.WakeUtc : note.AlarmUtc)?.ToLocalTime() ?? DateTime.Now.AddMinutes(5);
             var absolute = new StackPanel(); var relative = new StackPanel { Visibility = Visibility.Collapsed };
@@ -27,16 +27,16 @@ namespace DeskPins.App
             Ui.Field(absolute, repeat ? "开始日期" : "日期", date); Ui.Field(absolute, "时间", time); Ui.Field(relative, "分钟数（大于 0）", minutes);
             panel.Children.Add(absolute); panel.Children.Add(relative);
             mode.SelectionChanged += (s, e) => { absolute.Visibility = mode.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed; relative.Visibility = mode.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed; };
-            var kind = new ComboBox { ItemsSource = new[] { "每天", "每周", "每月指定日", "每月第几个星期", "每年", "固定间隔" }, SelectedIndex = repeat && note.Repeat != null ? (int)note.Repeat.Kind : 0 };
+            var kind = new ComboBox { ItemsSource = new[] { Ui.Text("每天"), Ui.Text("每周"), Ui.Text("每月指定日"), Ui.Text("每月第几个星期"), Ui.Text("每年"), Ui.Text("固定间隔") }, SelectedIndex = repeat && note.Repeat != null ? (int)note.Repeat.Kind : 0 };
             var day = new TextBox { Text = note.Repeat?.Day.ToString() ?? current.Day.ToString() };
             var month = new TextBox { Text = note.Repeat?.Month.ToString() ?? current.Month.ToString() };
             var position = new TextBox { Text = note.Repeat?.Position.ToString() ?? "1" };
-            var weekDay = new ComboBox { ItemsSource = new[] { "周日", "周一", "周二", "周三", "周四", "周五", "周六" }, SelectedIndex = note.Repeat?.WeekDay ?? (int)current.DayOfWeek };
-            var weekly = new StackPanel(); weekly.Children.Add(new TextBlock { Text = "选择星期", Margin = new Thickness(2, 10, 2, 4) });
+            var weekDay = new ComboBox { ItemsSource = new[] { Ui.Text("周日"), Ui.Text("周一"), Ui.Text("周二"), Ui.Text("周三"), Ui.Text("周四"), Ui.Text("周五"), Ui.Text("周六") }, SelectedIndex = note.Repeat?.WeekDay ?? (int)current.DayOfWeek };
+            var weekly = new StackPanel(); weekly.Children.Add(new TextBlock { Text = Ui.Text("选择星期"), Margin = new Thickness(2, 10, 2, 4) });
             var weekdays = new WrapPanel(); weekly.Children.Add(weekdays); var checks = new CheckBox[7];
-            for (int i = 0; i < 7; i++) { checks[i] = new CheckBox { Content = new[] { "周一", "周二", "周三", "周四", "周五", "周六", "周日" }[i], IsChecked = note.Repeat == null || ((note.Repeat.WeekDays & (1 << i)) != 0), Margin = new Thickness(5) }; weekdays.Children.Add(checks[i]); }
+            for (int i = 0; i < 7; i++) { checks[i] = new CheckBox { Content = Ui.Text(new[] { "周一", "周二", "周三", "周四", "周五", "周六", "周日" }[i]), IsChecked = note.Repeat == null || ((note.Repeat.WeekDays & (1 << i)) != 0), Margin = new Thickness(5) }; weekdays.Children.Add(checks[i]); }
             var interval = new TextBox { Text = note.Repeat?.Interval.ToString() ?? "1" };
-            var unit = new ComboBox { ItemsSource = new[] { "分钟", "小时", "天", "周" }, SelectedIndex = note.Repeat?.IntervalUnit ?? 2 };
+            var unit = new ComboBox { ItemsSource = new[] { Ui.Text("分钟"), Ui.Text("小时"), Ui.Text("天"), Ui.Text("周") }, SelectedIndex = note.Repeat?.IntervalUnit ?? 2 };
             var end = new DatePicker { SelectedDate = note.Repeat?.EndLocal?.Date };
             if (repeat)
             {
@@ -48,9 +48,9 @@ namespace DeskPins.App
                 Action update = () => { weekly.Visibility = kind.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed; monthlyDay.Visibility = kind.SelectedIndex == 2 || kind.SelectedIndex == 4 ? Visibility.Visible : Visibility.Collapsed; yearlyMonth.Visibility = kind.SelectedIndex == 4 ? Visibility.Visible : Visibility.Collapsed; monthlyPosition.Visibility = kind.SelectedIndex == 3 ? Visibility.Visible : Visibility.Collapsed; fixedInterval.Visibility = kind.SelectedIndex == 5 ? Visibility.Visible : Visibility.Collapsed; };
                 kind.SelectionChanged += (s, e) => update(); update(); Ui.Field(panel, "结束日期（留空表示持续）", end);
             }
-            var top = new CheckBox { Content = "唤醒时置顶", IsChecked = note.WakeTopmost, Margin = new Thickness(4, 10, 4, 4) };
-            var alarm = new CheckBox { Content = "唤醒时触发闹钟", IsChecked = note.WakeAlarm, Margin = new Thickness(4) };
-            var sound = new CheckBox { Content = "唤醒时播放声音", IsChecked = note.WakeSound, Margin = new Thickness(4) };
+            var top = new CheckBox { Content = Ui.Text("唤醒时置顶"), IsChecked = note.WakeTopmost, Margin = new Thickness(4, 10, 4, 4) };
+            var alarm = new CheckBox { Content = Ui.Text("唤醒时触发闹钟"), IsChecked = note.WakeAlarm, Margin = new Thickness(4) };
+            var sound = new CheckBox { Content = Ui.Text("唤醒时播放声音"), IsChecked = note.WakeSound, Margin = new Thickness(4) };
             if (sleep) { panel.Children.Add(top); panel.Children.Add(alarm); panel.Children.Add(sound); }
             buttons.Children.Add(Ui.Button("清除", () => { host.FlushNote(note); host.Library.Atomic(() => { if (sleep) host.Library.Move(note, NoteState.Desktop); else { note.AlarmUtc = null; host.Library.Save(note); } }); Close(); }));
             var ok = Ui.Button("确定", () =>
@@ -83,9 +83,9 @@ namespace DeskPins.App
     {
         public AttachWindow(AppHost host, Note note)
         {
-            Title = "附着到窗口"; Width = 700; Height = 470; WindowStartupLocation = WindowStartupLocation.CenterScreen; ShowInTaskbar = false; Ui.FitDialog(this, 540, 400);
+            Title = Ui.Text("附着到窗口"); Width = 700; Height = 470; WindowStartupLocation = WindowStartupLocation.CenterScreen; ShowInTaskbar = false; Ui.FitDialog(this, 540, 400);
             var panel = new DockPanel { Margin = new Thickness(16) }; var fields = new StackPanel(); DockPanel.SetDock(fields, Dock.Top); panel.Children.Add(fields);
-            var title = new TextBox { Text = note.Attachment?.TitlePattern ?? "*" }; var cls = new TextBox { Text = note.Attachment?.ClassPattern ?? "*" }; var relative = new CheckBox { Content = "相对于目标窗口定位", IsChecked = note.Attachment?.Relative ?? false, Margin = new Thickness(2, 8, 2, 8) };
+            var title = new TextBox { Text = note.Attachment?.TitlePattern ?? "*" }; var cls = new TextBox { Text = note.Attachment?.ClassPattern ?? "*" }; var relative = new CheckBox { Content = Ui.Text("相对于目标窗口定位"), IsChecked = note.Attachment?.Relative ?? false, Margin = new Thickness(2, 8, 2, 8) };
             Ui.Field(fields, "窗口标题（支持 * 和 ?）", title); Ui.Field(fields, "窗口类名（支持 * 和 ?）", cls); fields.Children.Add(relative);
             var list = new ListBox { ItemsSource = Native.Windows().Where(w => !host.OwnsWindow(w.Handle)).ToList() }; list.SelectionChanged += (s, e) => { var w = list.SelectedItem as WindowInfo; if (w != null) { title.Text = w.Title; cls.Text = w.Class; } };
             var buttons = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right }; DockPanel.SetDock(buttons, Dock.Bottom); panel.Children.Add(buttons);
