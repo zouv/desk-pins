@@ -6,7 +6,7 @@
 
 ## 已交付里程碑
 
-✅ AI 协作文档初始化（2026-11-07）：采用 vibe-coding-starter 的 docs-only 类型，约束调整为 C# / WPF。
+✅ AI 协作文档初始化（2026-11-07）：先以 docs-only 接入文档体系；2026-11-11 起标记为 custom + base_type=dotnet-native-desktop，脚手架仍是项目自有 WPF 实现。
 
 ✅ 0.1.0 开发版（2026-11-08）：已有可构建应用、回归与免安装包，详细变化见 CHANGELOG；完整复刻与视觉验收仍进行中。
 

@@ -4,6 +4,9 @@
 
 ## [未发布]
 
+### 变更
+- 文档体系：同步 vibe-coding-starter 2026-11-10.1（check-docs / skills / hook / `.vibe-template`），类型标记改为 `custom` + `base_type=dotnet-native-desktop`（脚手架仍是项目自有 WPF 实现）。
+
 ### 新增
 
 - 设置界面支持中文 / English 下拉切换；内置英文资源，自定义 JSON 语言文件仍可使用。切换在设置中即时预览，保存后应用，菜单、托盘与管理分类跟随当前语言。

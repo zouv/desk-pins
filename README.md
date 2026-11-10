@@ -42,6 +42,6 @@ C# / WPF / .NET Framework 4.8 / x64；面向 Windows 10 / 11，免安装，优�
 
 ## 协作文档
 
-从 [AGENTS.md](AGENTS.md) 开始，代码位置见 [ARCHITECTURE.md](ARCHITECTURE.md)，当前进度见 [HANDOFF.md](HANDOFF.md)。文档体系来源于 vibe-coding-starter 2026-10-31.4，使用 docs-only 类型初始化，再按纯 WPF 项目填写约束。
+从 [AGENTS.md](AGENTS.md) 开始，代码位置见 [ARCHITECTURE.md](ARCHITECTURE.md)，当前进度见 [HANDOFF.md](HANDOFF.md)。文档体系来源于 vibe-coding-starter 2026-11-10.1，类型标记为 custom + base_type=dotnet-native-desktop；脚手架仍是项目自有的纯 WPF 实现。
 
 运行 `sh manager.sh check-docs` 检查文档。具体操作和扩展例子见 [使用说明](docs/02-使用说明.md)。
