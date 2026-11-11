@@ -28,6 +28,7 @@ namespace DeskPins.App
         private readonly System.Windows.Threading.DispatcherTimer saveTimer;
         private TextEditor editor;
         private Note editing;
+        private Panel inlineTitleHost;
         private bool dirty, loading, buildingTree;
         private int lastCategory = -1;
         private Point dragStart;
@@ -133,6 +134,7 @@ namespace DeskPins.App
             notes.MouseDoubleClick += (s, e) => OpenSelected();
             notes.PreviewMouseLeftButtonDown += (s, e) => { dragReady = FindItem(e.OriginalSource as DependencyObject) != null; dragStart = e.GetPosition(notes); };
             notes.PreviewMouseLeftButtonUp += (s, e) => dragReady = false;
+            notes.PreviewMouseRightButtonDown += (s, e) => { var item = FindItem(e.OriginalSource as DependencyObject); var note = item == null ? null : item.DataContext as Note; if (note != null && !notes.SelectedItems.Contains(note)) { notes.SelectedItems.Clear(); notes.SelectedItem = note; } };
             notes.PreviewMouseMove += (s, e) => { var p = e.GetPosition(notes); if (dragReady && e.LeftButton == MouseButtonState.Pressed && (Math.Abs(p.X - dragStart.X) >= SystemParameters.MinimumHorizontalDragDistance || Math.Abs(p.Y - dragStart.Y) >= SystemParameters.MinimumVerticalDragDistance) && Selected().Length > 0) { dragReady = false; DragDrop.DoDragDrop(notes, new DataObject("DeskPins.Notes", Selected().Select(n => n.Id).ToArray()), DragDropEffects.Move); } };
             notes.ContextMenu = Context(); listPanel.Children.Add(notes);
             listHost = new Border { Background = Brushes.White, Child = listPanel, Visibility = Visibility.Collapsed };
@@ -152,7 +154,7 @@ namespace DeskPins.App
             Content = root;
 
             host.Library.Changed += Changed;
-            Closing += (s, e) => { try { SaveEditor(); host.Library.SaveCatalog(); } catch (Exception ex) { e.Cancel = true; Ui.Error(ex); } };
+            Closing += (s, e) => { try { SaveEditor(); SaveManagerState(); host.Library.SaveCatalog(); } catch (Exception ex) { e.Cancel = true; Ui.Error(ex); } };
             Closed += (s, e) => { saveTimer.Stop(); searchTimer.Stop(); host.Library.Changed -= Changed; };
             Deactivated += (s, e) => SaveEditor();
             PreviewKeyDown += (s, e) =>
@@ -160,14 +162,15 @@ namespace DeskPins.App
                 if (e.Key == Key.F2)
                 {
                     if (IsOutlineCategory(SelectedCategory) && tree.IsKeyboardFocusWithin) EditSelectedCollection();
-                    else { var n = notes.SelectedItem as Note; if (n != null) { var title = Ui.Ask("设置标题", "标题", n.Title); if (title != null) { n.Title = title; host.Library.Save(n); } } }
+                    else { var n = notes.SelectedItem as Note; EditNoteTitle(n); }
                     e.Handled = true;
                 }
                 else if (e.Key == Key.Delete && IsOutlineCategory(SelectedCategory) && tree.IsKeyboardFocusWithin) { DeleteSelectedCollection(); e.Handled = true; }
                 else if (e.Key == Key.N && Keyboard.Modifiers == ModifierKeys.Control) { NewNoteForSelection(); e.Handled = true; }
                 else if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control) { SelectCategory(10); BuildTree(); Refresh(); search.Focus(); e.Handled = true; }
             };
-            SelectCategory(0); ApplyLayout(); BuildTree(); Refresh();
+            KeyDown += (s, e) => { if (e.Key == Key.Escape) { Close(); e.Handled = true; } };
+            RestoreManagerState();
         }
 
         private static Button SmallButton(string text) { return new Button { Content = Ui.Text(text), Padding = new Thickness(8, 4, 8, 4), Margin = new Thickness(2, 0, 2, 2), MinHeight = 26, FontSize = 12 }; }
@@ -240,7 +243,7 @@ namespace DeskPins.App
             else host.Library.Catalog.Settings.ManagerOrders[category] = order.SelectedIndex;
             if (category == 0)
             {
-                SaveEditor(); editing = null; notes.ItemsSource = null; preview.Content = null; homeView.Content = BuildHomeDashboard(); return;
+                SaveEditor(); editing = null; notes.ItemsSource = null; preview.Content = null; inlineTitleHost = null; homeView.Content = BuildHomeDashboard(); return;
             }
             foreach (var note in host.Library.Notes.Values)
             {
@@ -345,15 +348,19 @@ namespace DeskPins.App
 
         private void DisplaySelected(bool force = false)
         {
-            if (loading || SelectedCategory == 0) return; var n = notes.SelectedItem as Note; if (!force && ReferenceEquals(editing, n) && (n == null || dirty || n.ModifiedUtc == displayedModifiedUtc)) return; SaveEditor(); editing = n; editor = null; dirty = false; preview.Content = null; if (n == null) return;
+            if (loading || SelectedCategory == 0) return; var n = notes.SelectedItem as Note; if (!force && ReferenceEquals(editing, n) && (n == null || dirty || n.ModifiedUtc == displayedModifiedUtc)) return; SaveEditor(); editing = n; editor = null; dirty = false; preview.Content = null; inlineTitleHost = null; if (n == null) return;
             displayedModifiedUtc = n.ModifiedUtc;
             if (n.Encrypted && host.Library.SessionPassword == null) { preview.Content = new StackPanel { Children = { new TextBlock { Text = Ui.Text("此便签已加密"), FontSize = 18, Margin = new Thickness(10) }, Ui.Button("解锁", () => { host.Unlock(); DisplaySelected(true); }) } }; return; }
             try
             {
                 host.Library.Load(n); loading = true;
                 var panel = new DockPanel();
-                var title = new TextBlock { Text = n.ManagerTitle, FontSize = 22, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6), ToolTip = n.Id };
-                DockPanel.SetDock(title, Dock.Top); panel.Children.Add(title);
+                var titleHost = new Grid();
+                var title = new TextBlock { Text = n.ManagerTitle, FontSize = 22, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6), ToolTip = n.Id + "\n" + Ui.Text("双击修改标题"), Cursor = Cursors.IBeam };
+                title.MouseLeftButtonDown += (s, e) => { if (e.ClickCount == 2) { BeginInlineTitleEdit(n, titleHost); e.Handled = true; } };
+                titleHost.Children.Add(title);
+                inlineTitleHost = titleHost;
+                DockPanel.SetDock(titleHost, Dock.Top); panel.Children.Add(titleHost);
                 var folder = host.Library.Catalog.Folders.FirstOrDefault(f => f.Id == n.FolderId);
                 var folderLine = folder == null ? "" : Ui.Text("文件夹") + ": " + host.FolderPath(folder) + "\n";
                 var info = new TextBlock { Text = folderLine + n.State + " · " + n.ModifiedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm") + "\n" + string.Join(" / ", n.Tags.Select(id => host.Library.Catalog.Tags.FirstOrDefault(t => t.Id == id)?.Name ?? id)), Foreground = Brushes.Gray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12) };
@@ -366,16 +373,79 @@ namespace DeskPins.App
         }
 
         public void FlushPending(Note note = null) { if (note == null || editing?.Id == note.Id) SaveEditor(); }
+        private void EditNoteTitle(Note note)
+        {
+            if (note == null) return;
+            if (ReferenceEquals(note, editing) && inlineTitleHost != null && inlineTitleHost.IsLoaded) { BeginInlineTitleEdit(note, inlineTitleHost); return; }
+            SaveEditor();
+            var title = Ui.Ask("设置标题", "标题", note.Title);
+            if (title == null || title == note.Title) return;
+            note.Title = title;
+            host.Library.Save(note);
+            Refresh();
+        }
+        private void BeginInlineTitleEdit(Note note, Panel titleHost)
+        {
+            SaveEditor();
+            var box = new TextBox { Text = note.Title, FontSize = 22, FontWeight = FontWeights.SemiBold, Padding = new Thickness(4, 2, 4, 2), BorderBrush = Ui.Brush("#93C5FD"), BorderThickness = new Thickness(1), Background = Brushes.White, Margin = new Thickness(0, 0, 0, 6) };
+            var finished = false;
+            Action<bool> finish = commit =>
+            {
+                if (finished) return;
+                finished = true;
+                if (commit)
+                {
+                    var text = box.Text ?? "";
+                    if (text != note.Title)
+                    {
+                        note.Title = text;
+                        host.Library.Save(note);
+                    }
+                }
+                DisplaySelected(true);
+            };
+            box.KeyDown += (s, e) => { if (e.Key == Key.Enter) { finish(true); e.Handled = true; } else if (e.Key == Key.Escape) { finish(false); e.Handled = true; } };
+            box.LostFocus += (s, e) => finish(true);
+            box.Loaded += (s, e) => box.Dispatcher.BeginInvoke(new Action(() => { box.Focus(); box.SelectAll(); }), System.Windows.Threading.DispatcherPriority.Input);
+            titleHost.Children.Clear(); titleHost.Children.Add(box);
+        }
         private void SaveEditor() { saveTimer.Stop(); if (!dirty || editing == null || editor == null || !host.Library.Notes.ContainsKey(editing.Id)) return; editor.Write(editing); host.Library.Save(editing); dirty = false; displayedModifiedUtc = editing.ModifiedUtc; host.ReloadWindow(editing); }
         private Note[] Selected() { return notes.SelectedItems.Cast<Note>().ToArray(); }
         private void Each(Action<Note> action) { SaveEditor(); try { foreach (var n in Selected()) action(n); Refresh(); } catch (Exception ex) { Ui.Error(ex); } }
         private void CloseSelected() { if (host.Library.Catalog.Settings.ConfirmClose && !Ui.Confirm(Ui.Text("关闭便签？"))) return; Each(n => host.Library.Move(n, NoteState.Closed)); }
-        private ContextMenu Context() { var m = new ContextMenu(); m.Items.Add(Ui.Item("新建便签", NewNoteForSelection)); m.Items.Add(Ui.Item("恢复 / 唤醒", () => Each(n => host.Library.Move(n, NoteState.Desktop)))); m.Items.Add(Ui.Item("关闭", CloseSelected)); m.Items.Add(Ui.Item("收藏", () => Each(n => host.Library.Move(n, NoteState.Stored)))); m.Items.Add(Ui.Item("复制", () => Each(n => { host.FlushNote(n); host.Library.Copy(n); }))); m.Items.Add(Ui.Item("标签…", () => host.AssignTags(Selected()))); m.Items.Add(Ui.Item("Ghost 开启", () => Each(n => { n.Ghost = true; host.Library.Save(n); }))); m.Items.Add(Ui.Item("Ghost 关闭", () => Each(n => { n.Ghost = false; host.Library.Save(n); }))); m.Items.Add(Ui.Item("分离附着", () => Each(n => { n.Attachment = null; host.Library.Save(n); }))); m.Items.Add(Ui.Item("导出…", () => Each(host.Export))); m.Items.Add(Ui.Item("属性…", () => { var n = notes.SelectedItem as Note; if (n != null) MessageBox.Show(Json.Text(n), Ui.Text("便签属性")); })); m.Items.Add(Ui.Item("永久删除…", () => { if (Ui.Confirm(Ui.Text("永久删除选中的便签？"))) Each(host.Library.Delete); })); return m; }
+        private ContextMenu Context() { var m = new ContextMenu(); m.Items.Add(Ui.Item("新建便签", NewNoteForSelection)); m.Items.Add(Ui.Item("设置标题…", () => EditNoteTitle(notes.SelectedItem as Note))); m.Items.Add(Ui.Item("恢复 / 唤醒", () => Each(n => host.Library.Move(n, NoteState.Desktop)))); m.Items.Add(Ui.Item("关闭", CloseSelected)); m.Items.Add(Ui.Item("收藏", () => Each(n => host.Library.Move(n, NoteState.Stored)))); m.Items.Add(Ui.Item("复制", () => Each(n => { host.FlushNote(n); host.Library.Copy(n); }))); m.Items.Add(Ui.Item("标签…", () => host.AssignTags(Selected()))); m.Items.Add(Ui.Item("Ghost 开启", () => Each(n => { n.Ghost = true; host.Library.Save(n); }))); m.Items.Add(Ui.Item("Ghost 关闭", () => Each(n => { n.Ghost = false; host.Library.Save(n); }))); m.Items.Add(Ui.Item("分离附着", () => Each(n => { n.Attachment = null; host.Library.Save(n); }))); m.Items.Add(Ui.Item("导出…", () => Each(host.Export))); m.Items.Add(Ui.Item("属性…", () => { var n = notes.SelectedItem as Note; if (n != null) MessageBox.Show(Json.Text(n), Ui.Text("便签属性")); })); m.Items.Add(Ui.Item("永久删除…", () => { if (Ui.Confirm(Ui.Text("永久删除选中的便签？"))) Each(host.Library.Delete); })); return m; }
 
         private void SelectNoteInList(string id)
         {
             var item = notes.Items.Cast<Note>().FirstOrDefault(n => n.Id == id);
             if (item != null) { notes.SelectedItem = item; notes.ScrollIntoView(item); }
+        }
+
+        private void SaveManagerState()
+        {
+            var settings = host.Library.Catalog.Settings;
+            settings.ManagerCategory = SelectedCategory;
+            settings.ManagerFolderFilter = folderFilter ?? "";
+            settings.ManagerStackFilter = stackFilter ?? "";
+            settings.ManagerTagFilter = tagFilter ?? "";
+            settings.ManagerSelectedNoteId = SelectedCategory == 0 ? "" : (notes.SelectedItem as Note)?.Id ?? "";
+            settings.ManagerCalendarDate = calendarSelected;
+        }
+
+        private void RestoreManagerState()
+        {
+            var settings = host.Library.Catalog.Settings;
+            int category = settings.ManagerCategory;
+            if (category < 0 || category > 10) category = 0;
+            calendarSelected = settings.ManagerCalendarDate == DateTime.MinValue ? DateTime.Today : settings.ManagerCalendarDate.Date;
+            calendarMonth = new DateTime(calendarSelected.Year, calendarSelected.Month, 1);
+            SelectCategory(category);
+            // The category handler clears filters; restore them after it has run.
+            folderFilter = settings.ManagerFolderFilter ?? "";
+            stackFilter = settings.ManagerStackFilter ?? "";
+            tagFilter = settings.ManagerTagFilter ?? "";
+            ApplyLayout(); BuildTree(); Refresh();
+            if (category != 0 && !string.IsNullOrEmpty(settings.ManagerSelectedNoteId)) SelectNoteInList(settings.ManagerSelectedNoteId);
         }
 
         private static DataTemplate NoteCardTemplate()

@@ -3,8 +3,10 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
+using System.Windows.Interop;
 using System.Windows.Media.Imaging;
 using DeskPins.Core;
 using DeskPins.App;
@@ -16,6 +18,7 @@ namespace DeskPins.Tests
         private static int checks;
         private static string auditDirectory;
         private static void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); checks++; Console.WriteLine("PASS " + name); }
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
         private static void Throws(Action action, string name) { bool threw = false; try { action(); } catch { threw = true; } Check(threw, name); }
         [STAThread]
         private static int Main(string[] args)
@@ -182,6 +185,8 @@ namespace DeskPins.Tests
             typeof(AppHost).GetMethod("RefreshLanguageSurfaces", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(host, null);
             Check(Field<System.Windows.Controls.Button>(firstWindow, "closeButton").ToolTip.ToString() == "关闭便签（可恢复）", "language refresh restores live note chrome");
             var manager = new ManagerWindow(host);
+            var managerMenu = (System.Windows.Controls.ContextMenu)typeof(ManagerWindow).GetMethod("Context", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(manager, null);
+            Check(managerMenu.Items.OfType<System.Windows.Controls.MenuItem>().Any(i => i.Header.ToString() == Ui.Text("设置标题…")), "manager note menu exposes Set title");
             var categories = Field<System.Windows.Controls.ListBox>(manager, "categories"); var listing = Field<System.Windows.Controls.ListBox>(manager, "notes");
             Check(categories.Items.Count == 11, "manager keeps the icon category rail");
             Check(categories.Items.Cast<System.Windows.Controls.ListBoxItem>().Select(i => (int)i.Tag).SequenceEqual(new[] { 0, 1, 2, 9, 8, 3, 4, 5, 6, 7, 10 }), "manager rail places tags below stacks and stored below tags");
@@ -246,12 +251,23 @@ namespace DeskPins.Tests
             var textMenu = (System.Windows.Controls.ContextMenu)typeof(NoteWindow).GetMethod("TextMenu", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(textWindow, null);
             Check(((System.Windows.Controls.MenuItem)textMenu.Items[1]).InputGestureText == "Ctrl+Alt+C" && host.ActionFor(System.Windows.Input.Key.C, System.Windows.Input.ModifierKeys.Control | System.Windows.Input.ModifierKeys.Alt) == "copy", "menu shortcut matches configured keyboard action"); host.Library.Catalog.Settings.Shortcuts.Remove("copy");
             var noteMenu = (System.Windows.Controls.ContextMenu)typeof(NoteWindow).GetMethod("Menu", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(textWindow, null);
+            var noteMenuHeaders = noteMenu.Items.OfType<System.Windows.Controls.MenuItem>().Select(m => m.Header.ToString()).ToList();
+            Check(noteMenuHeaders.IndexOf(Ui.Text("新建便签")) >= 0 && noteMenuHeaders.IndexOf(Ui.Text("管理便签…")) > noteMenuHeaders.IndexOf(Ui.Text("新建便签")), "note menu adds New note above Manage notes");
             var opacityMenu = noteMenu.Items.OfType<System.Windows.Controls.MenuItem>().First(m => m.Header.ToString() == "不透明度");
             opacityMenu.Items.OfType<System.Windows.Controls.MenuItem>().First(m => m.Header.ToString() == "50%").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.MenuItem.ClickEvent));
             Check(textNote.Opacity == .5 && Field<bool>(textWindow, "showOpacity"), "opacity menu applies immediately during active editing");
             Check(Math.Abs(textWindow.Opacity - .5) < .01, "opacity menu updates the live window opacity");
             opacityMenu.Items.OfType<System.Windows.Controls.MenuItem>().First(m => m.Header.ToString() == "100%").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.MenuItem.ClickEvent));
             Check(textNote.Opacity == 1, "opacity menu can restore full opacity");
+            var opacityProbe = new Window { WindowStyle = WindowStyle.None, AllowsTransparency = true, Width = 10, Height = 10, Opacity = .5, ShowInTaskbar = false, ShowActivated = false, Left = -10000, Top = -10000 };
+            opacityProbe.Show();
+            var opacityHandle = new WindowInteropHelper(opacityProbe).Handle;
+            Check((GetWindowLongPtr(opacityHandle, -20).ToInt64() & 0x80000L) != 0, "transparent note window uses layered opacity");
+            Native.SetGhost(opacityProbe, true);
+            Check((GetWindowLongPtr(opacityHandle, -20).ToInt64() & 0x20L) != 0 && (GetWindowLongPtr(opacityHandle, -20).ToInt64() & 0x80000L) != 0, "ghost keeps layered transparency");
+            Native.SetGhost(opacityProbe, false);
+            Check((GetWindowLongPtr(opacityHandle, -20).ToInt64() & 0x20L) == 0 && (GetWindowLongPtr(opacityHandle, -20).ToInt64() & 0x80000L) != 0, "non-ghost keeps layered transparency");
+            opacityProbe.Close();
             var spacingEditor = new TextEditor(); new System.Windows.Documents.TextRange(spacingEditor.Document.ContentStart, spacingEditor.Document.ContentEnd).Text = "abc\ndef\nabc\ndef";
             Check(spacingEditor.Document.Blocks.OfType<System.Windows.Documents.Paragraph>().All(p => p.Margin == new Thickness(0)), "text editor removes paragraph auto margins");
             var spacingNote = new Note(); spacingEditor.Write(spacingNote); var spacingReloaded = new TextEditor(); spacingReloaded.Read(spacingNote);
@@ -306,6 +322,30 @@ namespace DeskPins.Tests
         private static void LayoutTests(AppHost host, ManagerWindow manager, Note note)
         {
             var categories = Field<System.Windows.Controls.ListBox>(manager, "categories"); var preview = Field<System.Windows.Controls.ContentControl>(manager, "preview"); var notes = Field<System.Windows.Controls.ListBox>(manager, "notes"); var homeView = Field<System.Windows.Controls.ScrollViewer>(manager, "homeView");
+            var persistFolder = new Folder { Name = "Persist folder" }; host.Library.Catalog.Folders.Add(persistFolder);
+            var persistNote = host.Library.Create(); persistNote.Title = "Persist note"; host.Library.Move(persistNote, NoteState.Stored, persistFolder.Id); host.Library.SaveCatalog();
+            var persistManager = new ManagerWindow(host);
+            typeof(ManagerWindow).GetMethod("SelectCategory", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(persistManager, new object[] { 8 });
+            typeof(ManagerWindow).GetField("folderFilter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(persistManager, persistFolder.Id);
+            typeof(ManagerWindow).GetMethod("BuildTree", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(persistManager, null);
+            persistManager.Refresh();
+            Field<System.Windows.Controls.ListBox>(persistManager, "notes").SelectedItem = persistNote;
+            typeof(ManagerWindow).GetMethod("SaveManagerState", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(persistManager, null);
+            Check(host.Library.Catalog.Settings.ManagerCategory == 8 && host.Library.Catalog.Settings.ManagerFolderFilter == persistFolder.Id && host.Library.Catalog.Settings.ManagerSelectedNoteId == persistNote.Id, "manager saves navigation state");
+            var restoredManager = new ManagerWindow(host);
+            var restoredCategory = Field<System.Windows.Controls.ListBox>(restoredManager, "categories").SelectedItem as System.Windows.Controls.ListBoxItem;
+            Check(restoredCategory != null && (int)restoredCategory.Tag == 8 && Field<string>(restoredManager, "folderFilter") == persistFolder.Id && ReferenceEquals(Field<System.Windows.Controls.ListBox>(restoredManager, "notes").SelectedItem, persistNote), "manager restores stored folder and selected note");
+            host.Library.Delete(persistNote); host.Library.Catalog.Folders.Remove(persistFolder); host.Library.SaveCatalog();
+            var inlineNote = host.Library.Create(); inlineNote.Title = "Inline before"; host.Library.Save(inlineNote); host.Sync();
+            SelectCategory(categories, 1); manager.Refresh(); notes.SelectedItem = inlineNote;
+            var inlineHost = (System.Windows.Controls.Panel)typeof(ManagerWindow).GetField("inlineTitleHost", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(manager);
+            Check(inlineHost != null, "manager preview exposes inline title host");
+            typeof(ManagerWindow).GetMethod("BeginInlineTitleEdit", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(manager, new object[] { inlineNote, inlineHost });
+            var inlineBox = inlineHost.Children.OfType<System.Windows.Controls.TextBox>().FirstOrDefault();
+            Check(inlineBox != null, "double-click title creates inline editor");
+            inlineBox.Text = "Inline after"; inlineBox.RaiseEvent(new RoutedEventArgs(UIElement.LostFocusEvent));
+            Check(inlineNote.Title == "Inline after", "inline title edit commits on focus loss");
+            host.Library.Delete(inlineNote);
             var outlineColumn = Field<System.Windows.Controls.ColumnDefinition>(manager, "outlineColumn"); var listColumn = Field<System.Windows.Controls.ColumnDefinition>(manager, "listColumn");
             host.Library.Catalog.Settings.ManagerOutlineWidths[2] = 250; host.Library.Catalog.Settings.ManagerListWidths[2] = 350;
             host.Library.Catalog.Settings.ManagerOutlineWidths[8] = 230; host.Library.Catalog.Settings.ManagerListWidths[8] = 320;

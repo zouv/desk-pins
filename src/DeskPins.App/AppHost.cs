@@ -87,7 +87,7 @@ namespace DeskPins.App
         public void Start() { startupRestoring = true; var s = Library.Catalog.Settings; hidden = s.StartHidden; UpdateAttachments(); if (Library.Notes.Count == 0) { if (s.StartHidden) Library.Create(); else New(); } Sync(); Library.Tick(DateTime.UtcNow); }
         private IntPtr Messages(IntPtr h, int msg, IntPtr w, IntPtr l, ref bool handled)
         {
-            if (msg == 0x312) { int id = w.ToInt32(); if (id == 1) New(); else if (id == 2) ToggleAll(); else if (id == 3) Manage(); handled = true; }
+            if (msg == 0x312) { int id = w.ToInt32(); if (id == 1) New(); else if (id == 2) ToggleAll(); else if (id == 3) ToggleManage(); handled = true; }
             if (msg == 0x4A) { try { var cds = (CopyData)System.Runtime.InteropServices.Marshal.PtrToStructure(l, typeof(CopyData)); if (cds.Size > 0 && cds.Size < Transfer.MaxPacket) { var bytes = new byte[cds.Size]; System.Runtime.InteropServices.Marshal.Copy(cds.Data, bytes, 0, bytes.Length); string command = Encoding.UTF8.GetString(bytes).TrimEnd('\0'); if (command == "api do register" || command == "do register") Api.Register(w); if (command == "api do deregister" || command == "do deregister") Api.Deregister(w); var response = Api.Execute(command); Api.ReplyCopyData(w, cds.Tag, response); if (response == "000 exiting") Application.Current.Dispatcher.BeginInvoke(new Action(Exit)); handled = true; return new IntPtr(1); } } catch (Exception ex) { Log(ex.Message); } }
             return IntPtr.Zero;
         }
@@ -170,6 +170,13 @@ namespace DeskPins.App
         public void FlushNote(Note n) { NoteWindow w; if (Windows.TryGetValue(n.Id, out w)) w.Flush(); if (manager != null) manager.FlushPending(n); }
         public void FlushAll() { foreach (var w in Windows.Values.ToArray()) w.Flush(); if (manager != null) manager.FlushPending(); }
         public void Manage() { if (manager == null) { manager = new ManagerWindow(this); manager.Closed += (s, e) => manager = null; } manager.Show(); manager.Activate(); }
+        public void ToggleManage()
+        {
+            if (manager != null && manager.IsVisible && manager.IsActive) { manager.Close(); return; }
+            Manage();
+            if (manager != null && manager.WindowState == WindowState.Minimized) manager.WindowState = WindowState.Normal;
+            if (manager != null) manager.Activate();
+        }
         public void Settings()
         {
             if (settingsWindow == null)

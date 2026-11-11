@@ -75,7 +75,7 @@ namespace DeskPins.App
                 host.Library.Atomic(() => { if (!sleep) { note.AlarmUtc = utc; host.Library.Save(note); } else { note.WakeTopmost = top.IsChecked == true; note.WakeAlarm = alarm.IsChecked == true; note.WakeSound = sound.IsChecked == true; host.Library.Sleep(note, utc, rule); } }); Close();
             });
             ok.IsDefault = true; buttons.Children.Add(ok); var cancel = Ui.Button("取消", () => Close()); cancel.IsCancel = true; buttons.Children.Add(cancel);
-            Content = root; Loaded += (s, e) => time.Focus();
+            Content = root; Loaded += (s, e) => { time.Focus(); time.SelectAll(); };
         }
         private static int Integer(string text, int min, int max, string label) { int value; if (!int.TryParse(text, out value) || value < min || value > max) throw new ArgumentException(label + " 需在 " + min + "–" + max + " 范围内。"); return value; }
     }
@@ -93,6 +93,7 @@ namespace DeskPins.App
             buttons.Children.Add(Ui.Button("刷新", () => list.ItemsSource = Native.Windows(true).Where(w => !host.OwnsWindow(w.Handle)).ToList()));
             var ok = Ui.Button("确定", () => { if (string.IsNullOrWhiteSpace(title.Text) || string.IsNullOrWhiteSpace(cls.Text)) throw new ArgumentException("请填写窗口标题和类名；匹配全部请使用 *。"); host.FlushNote(note); var w = list.SelectedItem as WindowInfo; host.Library.Atomic(() => { note.StackId = ""; note.Attachment = new Attachment { TitlePattern = title.Text, ClassPattern = cls.Text, Relative = relative.IsChecked == true, OffsetX = w == null ? note.Attachment?.OffsetX ?? 0 : note.Left - w.Bounds.Left, OffsetY = w == null ? note.Attachment?.OffsetY ?? 0 : note.Top - w.Bounds.Top }; host.Library.Save(note); }); host.UpdateAttachments(); Close(); }); ok.IsDefault = true; buttons.Children.Add(ok);
             var cancel = Ui.Button("取消", () => Close()); cancel.IsCancel = true; buttons.Children.Add(cancel); panel.Children.Add(list); Content = panel;
+            Loaded += (s, e) => Dispatcher.BeginInvoke(new Action(() => { title.Focus(); title.SelectAll(); }), System.Windows.Threading.DispatcherPriority.Input);
         }
     }
 }

@@ -70,13 +70,13 @@ WPF 便签 / 管理 / 设置
 | 任务 | 入口 |
 |---|---|
 | 启动 / 单实例 / 命令行 | Program.Main、ApiService.Identity / Client |
-| 新建 / 显隐 / 托盘 | AppHost.Start / New / Sync / BuildTray / SetHidden |
+| 新建 / 显隐 / 托盘 | AppHost.Start / New / Sync / BuildTray / SetHidden / ToggleManage |
 | 编辑 / 格式 / 窗口 | NoteWindow.Run / HandleKeyDown / Flush、TextEditor.Format / Read / Write |
 | 图片算法 | ImageEditor.BeginStroke / ContinueStroke / CommitStroke / CancelEdit / Transform / Crop / ResizeImage、RasterCanvas |
 | 屏幕截取 | AppHost.Capture、CaptureWindow 构造 / Result |
 | 关于窗口 | AboutWindow 构造 / VersionText、AppHost.BuildTray 的“关于 DeskPins”菜单项 |
 | 状态转换 / 加密 | NoteLibrary.Move / Sleep / Load / Save / SetFolderEncrypted |
-| 管理与预览 | ManagerWindow 构造 / BuildTree / Refresh / DisplaySelected / DropTo / ApplyLayout / SavePaneWidths |
+| 管理与预览 | ManagerWindow 构造 / BuildTree / Refresh / DisplaySelected / DropTo / ApplyLayout / SavePaneWidths / EditNoteTitle / BeginInlineTitleEdit / SaveManagerState / RestoreManagerState |
 | 管理器集合管理 | ManagerWindow.CreateCollectionItem / EditCollection / DeleteCollection / MoveCollectionItem / NewNoteIn / TreeMouseMove / NodeDrop |
 | 管理器日历 | ManagerWindow.BuildCalendarView / CalendarDay / MatchesDate |
 | 管理器搜索 | ManagerWindow.BuildFindBar / SearchResults / OpenSearchTagFilter、SearchTagWindow |
@@ -112,7 +112,8 @@ WPF 便签 / 管理 / 设置
 - 日历由 ManagerWindow.Calendar 自绘：月份标题与星期标签按 Ui.CurrentLanguage 本地化，日格按 MatchesDate 统计创建 / 唤醒 / 重复发生日；修改筛选逻辑时同时更新日历计数和列表筛选，二者共用 MatchesDate。
 - 搜索由底部查找栏驱动：SearchResults 先按 SearchContent 选择数据库全文搜索或标题 / Id 内存匹配，再按 SearchTagFilter（任一标签）和六个范围开关过滤。输入 250 ms 防抖；范围 / 标签变化立即刷新并切到 Search 分类。Pin find bar 只在管理器内保持查找栏可见。
 - 设置导航共 9 类：应用、桌面、外观、内容、提醒、网络、邮件、快捷键、数据。数据页承载托盘移出的导入 / 备份 / 恢复 / 救回操作；数据目录用 SQLite Backup 复制到空目标，目标已有数据库则直接切换，写 `data-directory.txt` 后重启生效。Program、单实例和 API 都通过 DataLocation.Resolve。
-- 快捷键统一走 Ui.TryParseGesture / FormatGesture：支持无修饰普通键与 F1–F24；全局快捷键保存时必须带修饰键或功能键。全局新建 / 显隐 / 管理分别注册 HotKey ID 1 / 2 / 3。
+- 快捷键统一走 Ui.TryParseGesture / FormatGesture：支持无修饰普通键与 F1–F24；全局快捷键保存时必须带修饰键或功能键。全局新建 / 显隐 / 管理分别注册 HotKey ID 1 / 2 / 3；其中管理是 toggle：管理器前台时关闭，后台或未打开时打开。
+- 带输入框的弹框（`Ui.Ask`、`CollectionEditor`、`AttachWindow`、`ScheduleWindow`）应在 `Loaded` 后通过 Dispatcher 聚焦并全选输入框，避免打开后还要手动点一下。
 - 设置表单：Appearance 使用样式下拉 + 颜色 / 字体 / 透明度 / Tab 宽度 / 示例 / 阴影 / 皮肤；Content 管理链接、复选框、Shift+Ctrl 方向、7 个高亮色和图片行为；Alerts 管理唤醒默认值、声音文件与响铃；Desktop 管理启动隐藏、关闭确认、吸附距离 / 间隙和双击标题栏行为。
 
 ## 4. 接口契约
@@ -133,6 +134,7 @@ WPF 便签 / 管理 / 设置
 - Settings.Shortcuts：空字符串表示停用该应用内快捷键；DisabledShortcuts 保存停用前的手势，仅用于设置界面恢复显示，不参与键盘分发。GlobalNewKey / GlobalToggleKey / GlobalManageKey 为空同样表示关闭。
 - 数据目录不在 Catalog 内：DataLocation 的指针文件决定下次启动目录；`--data-dir` 命令行优先，显式参数会覆盖指针。
 - ManagerOutlineWidths / ManagerListWidths：按分类索引保存管理器的三栏 / 两栏宽度；Home 不显示列表，Stored / Stacks / Tags 保存大纲和列表宽度，其他分类保存列表宽度。
+- Settings.ManagerCategory / ManagerFolderFilter / ManagerStackFilter / ManagerTagFilter / ManagerSelectedNoteId / ManagerCalendarDate：管理便签关闭时保存的导航状态；`RestoreManagerState` 在构造时恢复。`categories.SelectionChanged` 会清空三个 filter，所以恢复顺序必须是“选分类 → 再写 filter → BuildTree / Refresh → 选便签”。失效的 folder / stack / tag 或已删除便签直接忽略。
 
 ## 5. 样式 / 资源分段地图（可选）
 
@@ -185,3 +187,4 @@ WPF 便签 / 管理 / 设置
 - 快捷键格式不要只用 KeyGestureConverter：它拒绝无修饰的普通字符键。统一使用 Ui.TryParseGesture / FormatGesture；全局快捷键必须带修饰键或功能键。
 - 快捷键启停以空手势表达，不要用“删除自定义项”表示停用，否则会退回默认手势并重新生效。
 - UI 测试使用 `new AppHost(..., testMode: true)`；`Focus` / `BringForward` / `ToggleAll` / `ShowAllNotes` / `BringStacksForward` 等会 `Show()` 窗口的路径必须尊重 `testMode`，否则 `package.bat` 跑 UI 回归时会闪一下便签窗口。
+- 便签窗口必须同时设置 `WindowStyle=None` 与 `AllowsTransparency=true`，`Window.Opacity` 才会通过 WPF 分层窗口生效；不要再通过 `SetLayeredWindowAttributes` 手动改非透明窗口的 alpha（WPF 会重置 `WS_EX_LAYERED`）。`Native.SetGhost` 只负责 `WS_EX_TRANSPARENT`。

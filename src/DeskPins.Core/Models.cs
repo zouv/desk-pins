@@ -130,6 +130,9 @@ namespace DeskPins.Core
         [DataMember] public Dictionary<int, int> ManagerOrders = new Dictionary<int, int>();
         [DataMember] public Dictionary<int, double> ManagerOutlineWidths = new Dictionary<int, double>();
         [DataMember] public Dictionary<int, double> ManagerListWidths = new Dictionary<int, double>();
+        [DataMember] public int ManagerCategory;
+        [DataMember] public string ManagerFolderFilter = "", ManagerStackFilter = "", ManagerTagFilter = "", ManagerSelectedNoteId = "";
+        [DataMember] public DateTime ManagerCalendarDate = DateTime.Today;
         [DataMember] public bool SearchDesktop = true, SearchAttached = true, SearchStored = true, SearchSleeping = true, SearchClosed = true, SearchRecurring = true;
         [DataMember] public bool SearchContent = true, SearchPinFindBar, SearchBarExpanded = true;
         [DataMember] public List<string> SearchTagFilter = new List<string>();
@@ -156,6 +159,12 @@ namespace DeskPins.Core
             if (ManagerOrders == null) ManagerOrders = new Dictionary<int, int>();
             if (ManagerOutlineWidths == null) ManagerOutlineWidths = new Dictionary<int, double>();
             if (ManagerListWidths == null) ManagerListWidths = new Dictionary<int, double>();
+            if (ManagerCategory < 0 || ManagerCategory > 10) ManagerCategory = 0;
+            if (ManagerFolderFilter == null) ManagerFolderFilter = "";
+            if (ManagerStackFilter == null) ManagerStackFilter = "";
+            if (ManagerTagFilter == null) ManagerTagFilter = "";
+            if (ManagerSelectedNoteId == null) ManagerSelectedNoteId = "";
+            if (ManagerCalendarDate == DateTime.MinValue) ManagerCalendarDate = DateTime.Today;
             if (SearchTagFilter == null) SearchTagFilter = new List<string>();
             SearchTagFilter.RemoveAll(string.IsNullOrEmpty);
             if (string.IsNullOrWhiteSpace(Language)) Language = "zh-CN";

@@ -44,7 +44,7 @@ namespace DeskPins.App
             TextBox text = null; PasswordBox secret = null; if (password) { secret = new PasswordBox { MinWidth = 300, Margin = new Thickness(0, 0, 0, 12) }; panel.Children.Add(secret); } else { text = new TextBox { Text = initial, MinWidth = 300, Margin = new Thickness(0, 0, 0, 12) }; panel.Children.Add(text); }
             string result = null; var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
             var ok = Button("确定", () => { result = password ? secret.Password : text.Text; window.DialogResult = true; }); ok.IsDefault = true; buttons.Children.Add(ok); var cancel = Button("取消", () => window.Close()); cancel.IsCancel = true; buttons.Children.Add(cancel); panel.Children.Add(buttons); window.Content = panel;
-            window.Loaded += (s, e) => { if (password) secret.Focus(); else { text.Focus(); text.SelectAll(); } }; window.ShowDialog(); return result;
+            window.Loaded += (s, e) => window.Dispatcher.BeginInvoke(new Action(() => { if (password) { secret.Focus(); secret.SelectAll(); } else { text.Focus(); text.SelectAll(); } }), System.Windows.Threading.DispatcherPriority.Input); window.ShowDialog(); return result;
         }
         public static bool Confirm(string message) { return MessageBox.Show(Text(message), "DeskPins", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes; }
         private static string TranslateFilter(string filter) { if (string.IsNullOrEmpty(filter)) return filter; var parts = filter.Split('|'); for (int i = 0; i < parts.Length; i += 2) parts[i] = Text(parts[i]); return string.Join("|", parts); }

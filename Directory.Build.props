@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Product>DeskPins</Product>
     <Description>Lightweight WPF desktop sticky notes.</Description>
     <LangVersion>latest</LangVersion>

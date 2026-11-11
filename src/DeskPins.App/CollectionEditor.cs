@@ -68,6 +68,7 @@ namespace DeskPins.App
             var cancel = Ui.Button("取消", () => window.Close()); cancel.IsCancel = true; buttons.Children.Add(cancel);
             panel.Children.Add(buttons);
             window.Content = panel;
+            window.Loaded += (s, e) => window.Dispatcher.BeginInvoke(new Action(() => { name.Focus(); name.SelectAll(); }), System.Windows.Threading.DispatcherPriority.Input);
             return window.ShowDialog() == true;
         }
 

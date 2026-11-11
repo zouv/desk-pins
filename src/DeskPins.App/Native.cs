@@ -29,7 +29,10 @@ namespace DeskPins.App
         }
         public static void SetGhost(Window window, bool ghost)
         {
-            IntPtr h = new WindowInteropHelper(window).Handle; if (h == IntPtr.Zero) return; long style = GetWindowLongPtr(h, -20).ToInt64(); style = ghost ? style | 0x20L | 0x80000L : style & ~0x20L; if (!ghost && !window.AllowsTransparency && window.Opacity >= 1) style &= ~0x80000L; SetWindowLongPtr(h, -20, new IntPtr(style)); if (ghost) SetLayeredWindowAttributes(h, 0, (byte)(Math.Max(0, Math.Min(1, window.Opacity)) * 255), 2);
+            IntPtr h = new WindowInteropHelper(window).Handle; if (h == IntPtr.Zero) return;
+            long style = GetWindowLongPtr(h, -20).ToInt64();
+            if (ghost) style |= 0x20L; else style &= ~0x20L;
+            SetWindowLongPtr(h, -20, new IntPtr(style));
         }
         public static void ToolWindow(Window window) { var h = new WindowInteropHelper(window).Handle; long s = GetWindowLongPtr(h, -20).ToInt64(); SetWindowLongPtr(h, -20, new IntPtr((s | 0x80L) & ~0x40000L)); }
         public static void RaiseNoActivate(Window window)
@@ -59,7 +62,6 @@ namespace DeskPins.App
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr h, StringBuilder b, int count);
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out RECT rect);
         [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
-        [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr h, uint color, byte alpha, uint flags);
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int command);
         [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr h, int index);

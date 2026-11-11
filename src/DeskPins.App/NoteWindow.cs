@@ -33,7 +33,7 @@ namespace DeskPins.App
         private int alarmStep;
         public NoteWindow(AppHost host, Note note)
         {
-            Host = host; Note = note; Title = "DeskPins · " + note.DisplayTitle; ShowInTaskbar = false; WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize; MinWidth = 100; MinHeight = 24;
+            Host = host; Note = note; Title = "DeskPins · " + note.DisplayTitle; ShowInTaskbar = false; WindowStyle = WindowStyle.None; AllowsTransparency = true; ResizeMode = ResizeMode.NoResize; MinWidth = 100; MinHeight = 24;
             UseLayoutRounding = true; SnapsToDevicePixels = true; Background = Ui.Brush(note.Color);
             var root = new Grid(); root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(22) }); root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             frame = new Border { BorderThickness = new Thickness(1), BorderBrush = Brushes.DimGray, Child = root }; Content = frame;
@@ -291,7 +291,7 @@ namespace DeskPins.App
             var send = Ui.Sub("发送到"); foreach (var friend in Host.Library.Catalog.Friends.Where(f => !f.Separator)) { var f = friend; send.Items.Add(Ui.Item((f.Group.Length > 0 ? f.Group + " / " : "") + f.Name, () => { Flush(); Host.Send(Note, f); })); }
             send.Items.Add(Ui.Item("地址 / 多人…", () => { Flush(); Host.SendCustom(Note); })); m.Items.Add(send);
             m.Items.Add(new Separator()); m.Items.Add(Ui.Item("复制便签", () => { Flush(); Host.Focus(Host.Library.Copy(Note)); })); m.Items.Add(Ui.Item("保存为…", () => Run("save"), Host.ShortcutFor("save"))); m.Items.Add(Ui.Item("复制到传输文件", () => { Flush(); Host.TransferFile(Note, false); })); m.Items.Add(Ui.Item("发送到传输文件", () => { Flush(); Host.TransferFile(Note, true); })); m.Items.Add(Ui.Item("打印…", () => Run("print"), Host.ShortcutFor("print"))); m.Items.Add(Ui.Item("设置皮肤…", () => Run("skin"), Host.ShortcutFor("skin"))); m.Items.Add(Ui.Item("恢复默认皮肤", () => { Note.SkinPath = ""; Host.Library.Save(Note); ApplyAppearance(); }));
-            Host.AddExtensionMenus(m, Note); m.Items.Add(new Separator()); m.Items.Add(Ui.Item("管理便签…", () => Run("manage"), Host.ShortcutFor("manage"))); m.Items.Add(Ui.Item("关闭（可恢复）", () => Run("close"), Host.ShortcutFor("close"))); m.Items.Add(Ui.Item("永久删除…", () => Run("delete"), Host.ShortcutFor("delete"))); return m;
+            Host.AddExtensionMenus(m, Note); m.Items.Add(new Separator()); m.Items.Add(Ui.Item("新建便签", () => Host.New(), Host.ShortcutFor("new"))); m.Items.Add(Ui.Item("管理便签…", () => Run("manage"), Host.ShortcutFor("manage"))); m.Items.Add(Ui.Item("关闭（可恢复）", () => Run("close"), Host.ShortcutFor("close"))); m.Items.Add(Ui.Item("永久删除…", () => Run("delete"), Host.ShortcutFor("delete"))); return m;
         }
         private ContextMenu TextMenu()
         {

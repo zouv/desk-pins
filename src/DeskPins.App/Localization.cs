@@ -146,7 +146,7 @@ namespace DeskPins.App
             {"恢复默认皮肤", "Reset skin"}, {"显示 / 隐藏全部便签", "Show / hide all notes"},
 
             // Note and manager menus.
-            {"设置标题…", "Set title…"}, {"设置颜色…", "Set color…"}, {"设为样式", "Apply style"}, {"卷起", "Roll up"},
+            {"设置标题…", "Set title…"}, {"设置颜色…", "Set color…"}, {"双击修改标题", "Double-click to edit title"}, {"设为样式", "Apply style"}, {"卷起", "Roll up"},
             {"不透明度", "Opacity"}, {"Ghost / 点击穿透", "Ghost / click-through"}, {"秘密便签", "Secret note"},
             {"滚动模式", "Scroll mode"}, {"底部固定（Stand）", "Stand"}, {"取消 Solo", "Stop solo"},
             {"Solo / 仅显示此便签", "Solo / show only this note"}, {"闹钟…", "Alarm…"}, {"休眠", "Sleep"},
