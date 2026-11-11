@@ -12,21 +12,19 @@ using DeskPins.Core;
 
 namespace DeskPins.App
 {
-    public sealed class ManagerWindow : Window
+    public sealed partial class ManagerWindow : Window
     {
         private readonly AppHost host;
         private readonly ListBox categories, notes;
         private readonly TreeView tree;
-        private readonly TextBox search;
         private readonly ComboBox order;
         private readonly ContentControl preview;
         private readonly ScrollViewer homeView;
         private readonly TextBlock count, heading, outlineHeading;
-        private readonly DatePicker calendar;
         private readonly Border outlineHost, listHost, previewHost;
         private readonly GridSplitter outlineSplitter, listSplitter;
         private readonly ColumnDefinition outlineColumn, outlineSplitterColumn, listColumn, listSplitterColumn;
-        private readonly StackPanel searchPanel;
+        private readonly Button outlineProperties, outlineDelete;
         private readonly System.Windows.Threading.DispatcherTimer saveTimer;
         private TextEditor editor;
         private Note editing;
@@ -37,7 +35,9 @@ namespace DeskPins.App
         private DateTime displayedModifiedUtc;
         private string folderFilter = "", stackFilter = "", tagFilter = "", navigationSnapshot = "";
         private readonly string[] names = { Ui.Text("首页"), Ui.Text("桌面"), Ui.Text("堆叠"), Ui.Text("附着"), Ui.Text("休眠中"), Ui.Text("重复提醒"), Ui.Text("日历"), Ui.Text("已关闭"), Ui.Text("已收藏"), Ui.Text("标签"), Ui.Text("搜索结果") };
-        private static readonly string[] railIcons = { "", "", "", "", "", "", "", "", "", "", "" };
+        private static readonly string[] railIcons = { "", "", "", "", "", "", "", "", "", "", "" };
+        // Category ids stay stable for persisted pane widths / sort orders; only the rail order changes.
+        private static readonly int[] CategoryOrder = { 0, 1, 2, 9, 8, 3, 4, 5, 6, 7, 10 };
 
         public ManagerWindow(AppHost host)
         {
@@ -45,23 +45,25 @@ namespace DeskPins.App
             Ui.FitDialog(this, 900, 520);
             saveTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) }; saveTimer.Tick += (s, e) => SaveEditor();
             var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var body = new Grid();
             body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
             body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             root.Children.Add(body);
 
-            categories = new ListBox { BorderThickness = new Thickness(0), Background = Ui.Brush("#1268B3"), Padding = new Thickness(0, 8, 0, 8), ItemContainerStyle = RailStyle(), HorizontalContentAlignment = HorizontalAlignment.Stretch, AllowDrop = true };
-            for (int i = 0; i < names.Length; i++)
+            categories = new ListBox { BorderThickness = new Thickness(0), Background = Ui.Brush("#1268B3"), Padding = new Thickness(0, 4, 0, 4), ItemContainerStyle = RailStyle(), HorizontalContentAlignment = HorizontalAlignment.Stretch, AllowDrop = true };
+            foreach (var category in CategoryOrder)
             {
                 var item = new ListBoxItem
                 {
-                    Content = new TextBlock { Text = railIcons[i], FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 21, Foreground = Brushes.White, HorizontalAlignment = HorizontalAlignment.Center },
-                    ToolTip = names[i], Tag = i, HorizontalContentAlignment = HorizontalAlignment.Center, Height = 48
+                    Content = new TextBlock { Text = railIcons[category], FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 19, Foreground = Brushes.White, HorizontalAlignment = HorizontalAlignment.Center },
+                    ToolTip = names[category], Tag = category, HorizontalContentAlignment = HorizontalAlignment.Center, Height = 40
                 };
-                System.Windows.Automation.AutomationProperties.SetName(item, names[i]);
+                System.Windows.Automation.AutomationProperties.SetName(item, names[category]);
                 categories.Items.Add(item);
             }
-            categories.Drop += (s, e) => { var item = FindItem(e.OriginalSource as DependencyObject); int index = item == null ? -1 : categories.Items.IndexOf(item); if (index == 1 || index == 7 || index == 8) DropTo(e, index == 1 ? NoteState.Desktop : index == 7 ? NoteState.Closed : NoteState.Stored, ""); };
+            categories.Drop += (s, e) => { var item = FindItem(e.OriginalSource as DependencyObject); if (item == null) return; int category = (int)item.Tag; if (category == 1 || category == 7 || category == 8) DropTo(e, category == 1 ? NoteState.Desktop : category == 7 ? NoteState.Closed : NoteState.Stored, ""); };
             categories.SelectionChanged += (s, e) => { if (buildingTree) return; SaveEditor(); folderFilter = stackFilter = tagFilter = ""; ApplyLayout(); BuildTree(); Refresh(); };
             Grid.SetColumn(categories, 0); body.Children.Add(categories);
 
@@ -73,11 +75,24 @@ namespace DeskPins.App
             workspace.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 220 });
 
             outlineHeading = new TextBlock { FontSize = 19, FontWeight = FontWeights.SemiBold, Foreground = Ui.Brush("#1F2937"), Margin = new Thickness(0, 0, 0, 8) };
-            tree = new TreeView { BorderThickness = new Thickness(0), Background = Brushes.White, Padding = new Thickness(0, 2, 0, 8), HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            var outlineTools = new WrapPanel { Margin = new Thickness(0, 0, 0, 6) };
+            var outlineCreate = SmallButton("新建"); outlineCreate.Click += (s, e) => OpenCreateMenu(outlineCreate);
+            outlineProperties = SmallButton("属性…"); outlineProperties.Click += (s, e) => EditSelectedCollection();
+            outlineDelete = SmallButton("删除"); outlineDelete.Click += (s, e) => DeleteSelectedCollection();
+            outlineTools.Children.Add(outlineCreate); outlineTools.Children.Add(outlineProperties); outlineTools.Children.Add(outlineDelete);
+            tree = new TreeView { BorderThickness = new Thickness(0), Background = Brushes.White, Padding = new Thickness(0, 2, 0, 8), HorizontalContentAlignment = HorizontalAlignment.Stretch, AllowDrop = true };
             tree.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
             tree.SelectedItemChanged += TreeSelected;
+            tree.PreviewMouseLeftButtonDown += TreeMouseDown;
+            tree.PreviewMouseMove += TreeMouseMove;
+            tree.PreviewMouseLeftButtonUp += (s, e) => treeDragReady = false;
+            tree.DragOver += TreeDragOver;
+            tree.Drop += TreeDrop;
+            tree.ContextMenu = BlankTreeMenu();
             var outlinePanel = new DockPanel { Margin = new Thickness(14, 14, 12, 12) };
-            DockPanel.SetDock(outlineHeading, Dock.Top); outlinePanel.Children.Add(outlineHeading); outlinePanel.Children.Add(tree);
+            DockPanel.SetDock(outlineHeading, Dock.Top); outlinePanel.Children.Add(outlineHeading);
+            DockPanel.SetDock(outlineTools, Dock.Top); outlinePanel.Children.Add(outlineTools);
+            outlinePanel.Children.Add(tree);
             outlineHost = new Border { Background = Brushes.White, BorderBrush = Ui.Brush("#E5E7EB"), BorderThickness = new Thickness(0, 0, 1, 0), Child = outlinePanel, Visibility = Visibility.Collapsed };
             Grid.SetColumn(outlineHost, 0); workspace.Children.Add(outlineHost);
             outlineSplitter = new GridSplitter { Width = 5, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, Background = Ui.Brush("#E5E7EB"), ResizeDirection = GridResizeDirection.Columns, ResizeBehavior = GridResizeBehavior.PreviousAndNext, Visibility = Visibility.Collapsed };
@@ -88,31 +103,17 @@ namespace DeskPins.App
             var listHeader = new Grid { Margin = new Thickness(0, 0, 0, 10) };
             listHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             listHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            listHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            listHeader.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             listHeader.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             listHeader.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             listHeader.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             heading = new TextBlock { FontSize = 24, FontWeight = FontWeights.SemiBold, Foreground = Ui.Brush("#1F2937"), TextTrimming = TextTrimming.CharacterEllipsis };
-            Grid.SetColumnSpan(heading, 3); listHeader.Children.Add(heading);
-            count = new TextBlock { FontSize = 12, Foreground = Ui.Brush("#6B7280"), Margin = new Thickness(2, 4, 0, 0), TextWrapping = TextWrapping.Wrap };
-            Grid.SetRow(count, 1); Grid.SetColumnSpan(count, 3); listHeader.Children.Add(count);
-            order = new ComboBox { ItemsSource = new[] { Ui.Text("修改时间 ↓"), Ui.Text("创建时间 ↓"), Ui.Text("标题 A–Z"), Ui.Text("提醒时间 ↑") }, SelectedIndex = 0, Width = 150, Height = 28, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
-            order.SelectionChanged += (s, e) => Refresh(); Grid.SetColumn(order, 1); Grid.SetRow(order, 2); listHeader.Children.Add(order);
-            var add = new Button { Content = "+", Width = 30, Height = 28, FontSize = 18, Padding = new Thickness(0), Margin = new Thickness(8, 0, 0, 0), ToolTip = Ui.Text("新建") };
-            add.Click += (s, e) => host.New();
-            var more = new Button { Content = "⋯", Width = 30, Height = 28, FontSize = 18, Padding = new Thickness(0), Margin = new Thickness(4, 0, 0, 0), ToolTip = Ui.Text("更多操作") };
-            var moreMenu = ManagerMenu(); more.Click += (s, e) => { moreMenu.PlacementTarget = more; moreMenu.IsOpen = true; };
-            var headerButtons = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            headerButtons.Children.Add(add); headerButtons.Children.Add(more);
-            Grid.SetColumn(headerButtons, 2); Grid.SetRow(headerButtons, 2); listHeader.Children.Add(headerButtons);
-            calendar = new DatePicker { SelectedDate = DateTime.Today, Margin = new Thickness(0, 6, 0, 0), Visibility = Visibility.Collapsed };
-            calendar.SelectedDateChanged += (s, e) => Refresh(); Grid.SetRow(calendar, 3); Grid.SetColumnSpan(calendar, 3); listHeader.Children.Add(calendar);
-            searchPanel = new StackPanel { Orientation = Orientation.Horizontal, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 8, 0, 0) };
-            searchPanel.Children.Add(new TextBlock { Text = "", FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 15, Foreground = Ui.Brush("#6B7280"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
-            search = new TextBox { MinWidth = 160, Height = 28, Padding = new Thickness(5, 0, 5, 0), VerticalContentAlignment = VerticalAlignment.Center, ToolTip = Ui.Text("搜索") };
-            search.KeyDown += (s, e) => { if (e.Key == Key.Enter) { categories.SelectedIndex = 10; Refresh(); } if (e.Key == Key.Escape) { search.Clear(); categories.SelectedIndex = 1; } };
-            searchPanel.Children.Add(search); Grid.SetRow(searchPanel, 3); Grid.SetColumnSpan(searchPanel, 3); listHeader.Children.Add(searchPanel);
+            Grid.SetColumnSpan(heading, 2); listHeader.Children.Add(heading);
+            count = new TextBlock { FontSize = 12, Foreground = Ui.Brush("#6B7280"), Margin = new Thickness(2, 8, 8, 0), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetRow(count, 1); listHeader.Children.Add(count);
+            order = new ComboBox { ItemsSource = new[] { Ui.Text("修改时间 ↓"), Ui.Text("创建时间 ↓"), Ui.Text("标题 A–Z"), Ui.Text("提醒时间 ↑") }, SelectedIndex = 0, Width = 150, Height = 28, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 4, 0, 0) };
+            order.SelectionChanged += (s, e) => Refresh(); Grid.SetColumn(order, 1); Grid.SetRow(order, 1); listHeader.Children.Add(order);
+            calendarHost = new Border { Visibility = Visibility.Collapsed };
+            Grid.SetRow(calendarHost, 2); Grid.SetColumnSpan(calendarHost, 2); listHeader.Children.Add(calendarHost);
             listPanel.Children.Add(listHeader);
             DockPanel.SetDock(listHeader, Dock.Top);
             notes = new ListBox { SelectionMode = SelectionMode.Extended, BorderThickness = new Thickness(0), Background = Brushes.Transparent, HorizontalContentAlignment = HorizontalAlignment.Stretch };
@@ -146,17 +147,33 @@ namespace DeskPins.App
             homeView = new ScrollViewer { Background = Brushes.White, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Visibility = Visibility.Collapsed };
             var contentLayer = new Grid(); contentLayer.Children.Add(previewHost); contentLayer.Children.Add(homeView);
             Grid.SetColumn(contentLayer, 4); workspace.Children.Add(contentLayer);
+            findBar = BuildFindBar();
+            Grid.SetRow(findBar, 1); root.Children.Add(findBar);
             Content = root;
 
             host.Library.Changed += Changed;
             Closing += (s, e) => { try { SaveEditor(); host.Library.SaveCatalog(); } catch (Exception ex) { e.Cancel = true; Ui.Error(ex); } };
-            Closed += (s, e) => { saveTimer.Stop(); host.Library.Changed -= Changed; };
+            Closed += (s, e) => { saveTimer.Stop(); searchTimer.Stop(); host.Library.Changed -= Changed; };
             Deactivated += (s, e) => SaveEditor();
-            PreviewKeyDown += (s, e) => { if (e.Key == Key.F2) { var n = notes.SelectedItem as Note; if (n != null) { var title = Ui.Ask("设置标题", "标题", n.Title); if (title != null) { n.Title = title; host.Library.Save(n); } } e.Handled = true; } if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control) { categories.SelectedIndex = 10; search.Focus(); e.Handled = true; } };
-            categories.SelectedIndex = 0; ApplyLayout(); BuildTree(); Refresh();
+            PreviewKeyDown += (s, e) =>
+            {
+                if (e.Key == Key.F2)
+                {
+                    if (IsOutlineCategory(SelectedCategory) && tree.IsKeyboardFocusWithin) EditSelectedCollection();
+                    else { var n = notes.SelectedItem as Note; if (n != null) { var title = Ui.Ask("设置标题", "标题", n.Title); if (title != null) { n.Title = title; host.Library.Save(n); } } }
+                    e.Handled = true;
+                }
+                else if (e.Key == Key.Delete && IsOutlineCategory(SelectedCategory) && tree.IsKeyboardFocusWithin) { DeleteSelectedCollection(); e.Handled = true; }
+                else if (e.Key == Key.N && Keyboard.Modifiers == ModifierKeys.Control) { NewNoteForSelection(); e.Handled = true; }
+                else if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control) { SelectCategory(10); BuildTree(); Refresh(); search.Focus(); e.Handled = true; }
+            };
+            SelectCategory(0); ApplyLayout(); BuildTree(); Refresh();
         }
 
+        private static Button SmallButton(string text) { return new Button { Content = Ui.Text(text), Padding = new Thickness(8, 4, 8, 4), Margin = new Thickness(2, 0, 2, 2), MinHeight = 26, FontSize = 12 }; }
         private static bool IsOutlineCategory(int category) { return category == 2 || category == 8 || category == 9; }
+        private int SelectedCategory { get { var item = categories == null ? null : categories.SelectedItem as ListBoxItem; return item == null || !(item.Tag is int) ? 0 : (int)item.Tag; } }
+        private void SelectCategory(int category) { if (categories != null) categories.SelectedItem = categories.Items.Cast<ListBoxItem>().FirstOrDefault(i => object.Equals(i.Tag, category)); }
         private static Style RailStyle()
         {
             var style = new Style(typeof(ListBoxItem));
@@ -172,7 +189,7 @@ namespace DeskPins.App
 
         private void ApplyLayout()
         {
-            int category = categories == null ? 0 : Math.Max(0, categories.SelectedIndex);
+            int category = SelectedCategory;
             bool outline = IsOutlineCategory(category), list = category != 0;
             double outlineWidth = GetOutlineWidth(category), listWidth = GetListWidth(category);
             outlineColumn.Width = outline ? new GridLength(outlineWidth) : new GridLength(0);
@@ -185,44 +202,20 @@ namespace DeskPins.App
             listSplitter.Visibility = list ? Visibility.Visible : Visibility.Collapsed;
             previewHost.Visibility = category == 0 ? Visibility.Collapsed : Visibility.Visible;
             homeView.Visibility = category == 0 ? Visibility.Visible : Visibility.Collapsed;
-            calendar.Visibility = category == 6 ? Visibility.Visible : Visibility.Collapsed;
-            searchPanel.Visibility = category == 10 ? Visibility.Visible : Visibility.Collapsed;
-            outlineHeading.Text = category == 8 ? Ui.Text("收藏文件夹") : category == 2 ? names[2] : category == 9 ? names[9] : "";
+            calendarHost.Visibility = category == 6 ? Visibility.Visible : Visibility.Collapsed;
+            outlineHeading.Text = category == 8 ? names[8] : category == 2 ? names[2] : category == 9 ? names[9] : "";
+            if (tree != null) tree.ContextMenu = IsOutlineCategory(category) ? BlankTreeMenu() : null;
+            if (outlineProperties != null) outlineProperties.IsEnabled = outlineDelete.IsEnabled = tree.SelectedItem is TreeViewItem;
+            ApplyFindBarLayout();
         }
-        private double GetOutlineWidth(int category) { double value; if (host.Library.Catalog.Settings.ManagerOutlineWidths.TryGetValue(category, out value) && value >= 150) return Math.Min(420, value); return 220; }
+        private double GetOutlineWidth(int category) { double value; if (host.Library.Catalog.Settings.ManagerOutlineWidths.TryGetValue(category, out value) && value >= 150) return Math.Min(420, value); return 240; }
         private double GetListWidth(int category) { double value; if (host.Library.Catalog.Settings.ManagerListWidths.TryGetValue(category, out value) && value >= 180) return Math.Min(620, value); return 340; }
         private void SavePaneWidths()
         {
-            int category = categories.SelectedIndex; if (category == 0) return;
+            int category = SelectedCategory; if (category == 0) return;
             if (IsOutlineCategory(category)) { var width = outlineHost.ActualWidth; if (width >= 150) host.Library.Catalog.Settings.ManagerOutlineWidths[category] = width; }
             var listWidth = listHost.ActualWidth; if (listWidth >= 180) host.Library.Catalog.Settings.ManagerListWidths[category] = listWidth;
             host.Library.SaveCatalog();
-        }
-
-        private ContextMenu ManagerMenu()
-        {
-            var menu = new ContextMenu();
-            menu.Items.Add(Ui.Item("新建", () => host.New()));
-            menu.Items.Add(Ui.Item("恢复到桌面", () => Each(n => host.Library.Move(n, NoteState.Desktop))));
-            menu.Items.Add(Ui.Item("关闭", CloseSelected));
-            menu.Items.Add(Ui.Item("收藏", () => Each(n => host.Library.Move(n, NoteState.Stored))));
-            menu.Items.Add(new Separator());
-            menu.Items.Add(Ui.Item("标签…", () => host.AssignTags(Selected())));
-            menu.Items.Add(Ui.Item("文件夹…", () => host.Collections("folders")));
-            menu.Items.Add(Ui.Item("联系人…", () => host.Friends()));
-            menu.Items.Add(Ui.Item("解锁 / 锁定", () => { if (host.Library.SessionPassword == null) { host.Unlock(); DisplaySelected(true); } else { SaveEditor(); host.Library.Lock(); editing = null; DisplaySelected(true); } }));
-            menu.Items.Add(Ui.Item("设置…", () => host.Settings()));
-            return menu;
-        }
-
-        private void TreeSelected(object sender, RoutedPropertyChangedEventArgs<object> e)
-        {
-            if (buildingTree) return;
-            var node = tree.SelectedItem as TreeViewItem; if (node == null) return;
-            if (node.Tag is Folder folder) folderFilter = folder.Id;
-            else if (node.Tag is NoteStack stack) stackFilter = stack.Id;
-            else if (node.Tag is Tag tag) tagFilter = tag.Id;
-            BuildTree(); Refresh();
         }
 
         private void OpenSelected()
@@ -242,14 +235,21 @@ namespace DeskPins.App
             if (notes == null || order == null || categories == null) return;
             ApplyLayout();
             BuildTree();
-            int category = categories.SelectedIndex;
+            int category = SelectedCategory;
             if (lastCategory != category) { lastCategory = category; int saved; host.Library.Catalog.Settings.ManagerOrders.TryGetValue(category, out saved); order.SelectedIndex = Math.Max(0, Math.Min(3, saved)); }
             else host.Library.Catalog.Settings.ManagerOrders[category] = order.SelectedIndex;
             if (category == 0)
             {
                 SaveEditor(); editing = null; notes.ItemsSource = null; preview.Content = null; homeView.Content = BuildHomeDashboard(); return;
             }
-            foreach (var note in host.Library.Notes.Values) { note.DisplayModifiedDates = host.Library.Catalog.Settings.ManagerModifiedDates; note.CompactPreview = host.Library.Catalog.Settings.CompactList; }
+            foreach (var note in host.Library.Notes.Values)
+            {
+                note.DisplayModifiedDates = host.Library.Catalog.Settings.ManagerModifiedDates;
+                note.CompactPreview = host.Library.Catalog.Settings.CompactList;
+                note.ShowId = category == 7;
+                note.DisplayTags = (note.Tags ?? new List<string>()).Select(id => host.Library.Catalog.Tags.FirstOrDefault(t => t.Id == id)).Where(t => t != null).ToList();
+            }
+            if (category == 6) BuildCalendar();
             IEnumerable<Note> list = host.Library.Notes.Values;
             switch (category)
             {
@@ -258,16 +258,16 @@ namespace DeskPins.App
                 case 3: list = list.Where(n => n.Attachment != null && !host.IsAttachmentVisible(n)); break;
                 case 4: list = list.Where(n => n.State == NoteState.Sleeping); break;
                 case 5: list = list.Where(n => n.State == NoteState.Recurring); break;
-                case 6: var date = calendar.SelectedDate ?? DateTime.Today; list = list.Where(n => n.CreatedUtc.ToLocalTime().Date == date.Date || (n.WakeUtc.HasValue && n.WakeUtc.Value.ToLocalTime().Date == date.Date) || (n.Repeat != null && RepeatSchedule.Next(n.Repeat, date.Date.AddTicks(-1))?.Date == date.Date)); break;
+                case 6: list = list.Where(n => MatchesDate(n, calendarSelected)); break;
                 case 7: list = list.Where(n => n.State == NoteState.Closed); break;
                 case 8: list = list.Where(n => n.State == NoteState.Stored && (folderFilter == "" || n.FolderId == folderFilter)); break;
                 case 9: list = list.Where(n => tagFilter == "" ? n.Tags.Count > 0 : n.Tags.Contains(tagFilter)); break;
-                case 10: list = host.Library.Search(search.Text); break;
+                case 10: list = SearchResults(); break;
             }
             if (order.SelectedIndex == 2) list = list.OrderBy(n => n.DisplayTitle); else if (order.SelectedIndex == 1) list = list.OrderByDescending(n => n.CreatedUtc); else if (order.SelectedIndex == 3) list = list.OrderBy(n => n.WakeUtc ?? n.AlarmUtc ?? DateTime.MaxValue); else list = list.OrderByDescending(n => n.ModifiedUtc);
             var items = list.ToList(); string selected = (notes.SelectedItem as Note)?.Id;
             loading = true; notes.ItemsSource = items; notes.SelectedItem = items.FirstOrDefault(n => n.Id == selected); loading = false;
-            heading.Text = HeadingFor(category); count.Text = category == 7 ? Ui.Text("数量：") + " " + items.Count + " " + Ui.Text("已丢失") + " (" + Ui.Text("最近修改优先") + ")" : Ui.Text("数量：") + " " + items.Count;
+            heading.Text = HeadingFor(category); count.Text = Ui.Text("数量：") + " " + items.Count;
             DisplaySelected();
         }
 
@@ -276,6 +276,7 @@ namespace DeskPins.App
             if (category == 8) { var folder = host.Library.Catalog.Folders.FirstOrDefault(f => f.Id == folderFilter); return folder == null ? names[8] : folder.Name; }
             if (category == 2) { var stack = host.Library.Catalog.Stacks.FirstOrDefault(s => s.Id == stackFilter); return stack == null ? names[2] : stack.Name; }
             if (category == 9) { var tag = host.Library.Catalog.Tags.FirstOrDefault(t => t.Id == tagFilter); return tag == null ? names[9] : Ui.Text("标签") + ": " + tag.Name; }
+            if (category == 10) { var term = (search == null ? "" : (search.Text ?? "").Trim()); return Ui.Text("搜索结果") + (term.Length == 0 ? "" : ": " + term); }
             return names[Math.Max(0, Math.Min(names.Length - 1, category))];
         }
 
@@ -344,15 +345,14 @@ namespace DeskPins.App
 
         private void DisplaySelected(bool force = false)
         {
-            if (loading || categories.SelectedIndex == 0) return; var n = notes.SelectedItem as Note; if (!force && ReferenceEquals(editing, n) && (n == null || dirty || n.ModifiedUtc == displayedModifiedUtc)) return; SaveEditor(); editing = n; editor = null; dirty = false; preview.Content = null; if (n == null) return;
+            if (loading || SelectedCategory == 0) return; var n = notes.SelectedItem as Note; if (!force && ReferenceEquals(editing, n) && (n == null || dirty || n.ModifiedUtc == displayedModifiedUtc)) return; SaveEditor(); editing = n; editor = null; dirty = false; preview.Content = null; if (n == null) return;
             displayedModifiedUtc = n.ModifiedUtc;
             if (n.Encrypted && host.Library.SessionPassword == null) { preview.Content = new StackPanel { Children = { new TextBlock { Text = Ui.Text("此便签已加密"), FontSize = 18, Margin = new Thickness(10) }, Ui.Button("解锁", () => { host.Unlock(); DisplaySelected(true); }) } }; return; }
             try
             {
                 host.Library.Load(n); loading = true;
                 var panel = new DockPanel();
-                var titleText = categories.SelectedIndex == 7 ? "‹ " + n.DisplayTitle + " ›" : n.DisplayTitle;
-                var title = new TextBlock { Text = titleText, FontSize = 22, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) };
+                var title = new TextBlock { Text = n.ManagerTitle, FontSize = 22, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6), ToolTip = n.Id };
                 DockPanel.SetDock(title, Dock.Top); panel.Children.Add(title);
                 var folder = host.Library.Catalog.Folders.FirstOrDefault(f => f.Id == n.FolderId);
                 var folderLine = folder == null ? "" : Ui.Text("文件夹") + ": " + host.FolderPath(folder) + "\n";
@@ -370,64 +370,35 @@ namespace DeskPins.App
         private Note[] Selected() { return notes.SelectedItems.Cast<Note>().ToArray(); }
         private void Each(Action<Note> action) { SaveEditor(); try { foreach (var n in Selected()) action(n); Refresh(); } catch (Exception ex) { Ui.Error(ex); } }
         private void CloseSelected() { if (host.Library.Catalog.Settings.ConfirmClose && !Ui.Confirm(Ui.Text("关闭便签？"))) return; Each(n => host.Library.Move(n, NoteState.Closed)); }
-        private ContextMenu Context() { var m = new ContextMenu(); m.Items.Add(Ui.Item("恢复 / 唤醒", () => Each(n => host.Library.Move(n, NoteState.Desktop)))); m.Items.Add(Ui.Item("关闭", CloseSelected)); m.Items.Add(Ui.Item("收藏", () => Each(n => host.Library.Move(n, NoteState.Stored)))); m.Items.Add(Ui.Item("复制", () => Each(n => { host.FlushNote(n); host.Library.Copy(n); }))); m.Items.Add(Ui.Item("标签…", () => host.AssignTags(Selected()))); m.Items.Add(Ui.Item("Ghost 开启", () => Each(n => { n.Ghost = true; host.Library.Save(n); }))); m.Items.Add(Ui.Item("Ghost 关闭", () => Each(n => { n.Ghost = false; host.Library.Save(n); }))); m.Items.Add(Ui.Item("分离附着", () => Each(n => { n.Attachment = null; host.Library.Save(n); }))); m.Items.Add(Ui.Item("导出…", () => Each(host.Export))); m.Items.Add(Ui.Item("属性…", () => { var n = notes.SelectedItem as Note; if (n != null) MessageBox.Show(Json.Text(n), Ui.Text("便签属性")); })); m.Items.Add(Ui.Item("永久删除…", () => { if (Ui.Confirm(Ui.Text("永久删除选中的便签？"))) Each(host.Library.Delete); })); return m; }
+        private ContextMenu Context() { var m = new ContextMenu(); m.Items.Add(Ui.Item("新建便签", NewNoteForSelection)); m.Items.Add(Ui.Item("恢复 / 唤醒", () => Each(n => host.Library.Move(n, NoteState.Desktop)))); m.Items.Add(Ui.Item("关闭", CloseSelected)); m.Items.Add(Ui.Item("收藏", () => Each(n => host.Library.Move(n, NoteState.Stored)))); m.Items.Add(Ui.Item("复制", () => Each(n => { host.FlushNote(n); host.Library.Copy(n); }))); m.Items.Add(Ui.Item("标签…", () => host.AssignTags(Selected()))); m.Items.Add(Ui.Item("Ghost 开启", () => Each(n => { n.Ghost = true; host.Library.Save(n); }))); m.Items.Add(Ui.Item("Ghost 关闭", () => Each(n => { n.Ghost = false; host.Library.Save(n); }))); m.Items.Add(Ui.Item("分离附着", () => Each(n => { n.Attachment = null; host.Library.Save(n); }))); m.Items.Add(Ui.Item("导出…", () => Each(host.Export))); m.Items.Add(Ui.Item("属性…", () => { var n = notes.SelectedItem as Note; if (n != null) MessageBox.Show(Json.Text(n), Ui.Text("便签属性")); })); m.Items.Add(Ui.Item("永久删除…", () => { if (Ui.Confirm(Ui.Text("永久删除选中的便签？"))) Each(host.Library.Delete); })); return m; }
 
-        private void BuildTree()
+        private void SelectNoteInList(string id)
         {
-            if (tree == null) return;
-            int category = categories.SelectedIndex;
-            if (!IsOutlineCategory(category)) { if (tree.Items.Count > 0) tree.Items.Clear(); navigationSnapshot = category + "|none"; return; }
-            if (category == 8 && !host.Library.Catalog.Folders.Any(f => f.Id == folderFilter)) folderFilter = "";
-            if (category == 2 && !host.Library.Catalog.Stacks.Any(s => s.Id == stackFilter)) stackFilter = "";
-            if (category == 9 && !host.Library.Catalog.Tags.Any(t => t.Id == tagFilter)) tagFilter = "";
-            var snapshot = category + "|" + folderFilter + "|" + stackFilter + "|" + tagFilter + "|" +
-                Json.Text(host.Library.Catalog.Folders.Select(f => new[] { f.Id, f.Name, f.ParentId, f.Encrypted.ToString(), host.Library.Notes.Values.Count(n => n.State == NoteState.Stored && n.FolderId == f.Id).ToString() }).ToArray()) +
-                Json.Text(host.Library.Catalog.Stacks.Select(s => new[] { s.Id, s.Name, host.Library.Notes.Values.Count(n => n.StackId == s.Id).ToString() }).ToArray()) +
-                Json.Text(host.Library.Catalog.Tags.Select(t => new[] { t.Id, t.Name, host.Library.Notes.Values.Count(n => n.Tags.Contains(t.Id)).ToString() }).ToArray());
-            if (snapshot == navigationSnapshot && tree.Items.Count > 0) return;
-            navigationSnapshot = snapshot; buildingTree = true;
-            try
-            {
-                tree.Items.Clear();
-                if (category == 8) foreach (var folder in host.Library.Catalog.Folders.Where(f => f.ParentId == "")) tree.Items.Add(FolderNode(folder, new HashSet<string>()));
-                else if (category == 2) foreach (var stack in host.Library.Catalog.Stacks) tree.Items.Add(new TreeViewItem { Header = NodeHeader(railIcons[2], stack.Name, host.Library.Notes.Values.Count(n => n.StackId == stack.Id)), Tag = stack, HorizontalContentAlignment = HorizontalAlignment.Stretch });
-                else foreach (var tag in host.Library.Catalog.Tags) tree.Items.Add(new TreeViewItem { Header = NodeHeader("◆", tag.Name, host.Library.Notes.Values.Count(n => n.Tags.Contains(tag.Id)), Ui.Brush(tag.Color)), Tag = tag, HorizontalContentAlignment = HorizontalAlignment.Stretch });
-                foreach (var node in Nodes(tree.Items)) if ((node.Tag as Folder)?.Id == folderFilter || (node.Tag as NoteStack)?.Id == stackFilter || (node.Tag as Tag)?.Id == tagFilter) { node.IsSelected = true; break; }
-            }
-            finally { buildingTree = false; }
+            var item = notes.Items.Cast<Note>().FirstOrDefault(n => n.Id == id);
+            if (item != null) { notes.SelectedItem = item; notes.ScrollIntoView(item); }
         }
-
-        private static Grid NodeHeader(string glyph, string name, int count, Brush color = null)
-        {
-            var panel = new Grid { MinWidth = 180 };
-            panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
-            panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            panel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var icon = new TextBlock { Text = glyph, FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 14, Foreground = color ?? Ui.Brush("#1268B3"), VerticalAlignment = VerticalAlignment.Center };
-            panel.Children.Add(icon);
-            var label = new TextBlock { Text = name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
-            Grid.SetColumn(label, 1); panel.Children.Add(label);
-            var countBlock = new TextBlock { Text = count.ToString(), Foreground = Ui.Brush("#6B7280"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
-            Grid.SetColumn(countBlock, 2); panel.Children.Add(countBlock);
-            return panel;
-        }
-        private static IEnumerable<TreeViewItem> Nodes(ItemCollection items) { foreach (TreeViewItem item in items) { yield return item; foreach (var child in Nodes(item.Items)) yield return child; } }
-        private TreeViewItem FolderNode(Folder f, HashSet<string> visited) { var node = new TreeViewItem { Header = NodeHeader(railIcons[8], (f.Encrypted ? "🔒 " : "") + f.Name, host.Library.Notes.Values.Count(n => n.State == NoteState.Stored && n.FolderId == f.Id)), Tag = f, AllowDrop = true, IsExpanded = true, HorizontalContentAlignment = HorizontalAlignment.Stretch }; if (!visited.Add(f.Id)) return node; foreach (var child in host.Library.Catalog.Folders.Where(x => x.ParentId == f.Id)) node.Items.Add(FolderNode(child, visited)); node.Drop += (s, e) => { if (e.Handled || !e.Data.GetDataPresent("DeskPins.Notes")) return; e.Handled = true; try { host.EnsureUnlocked(f); DropTo(e, NoteState.Stored, f.Id); } catch (Exception ex) { Ui.Error(ex); } }; return node; }
-        private void DropTo(DragEventArgs e, NoteState state, string folder) { if (!e.Data.GetDataPresent("DeskPins.Notes")) return; e.Handled = true; try { SaveEditor(); var targets = ((string[])e.Data.GetData("DeskPins.Notes")).Where(host.Library.Notes.ContainsKey).Select(id => host.Library.Notes[id]).ToArray(); foreach (var n in targets) host.FlushNote(n); host.Library.Atomic(() => { foreach (var n in targets) host.Library.Move(n, state, folder); }); Refresh(); } catch (Exception ex) { Ui.Error(ex); } }
-        private static ListBoxItem FindItem(DependencyObject obj) { while (obj != null && !(obj is ListBoxItem)) obj = obj is System.Windows.Media.Visual || obj is System.Windows.Media.Media3D.Visual3D ? System.Windows.Media.VisualTreeHelper.GetParent(obj) : LogicalTreeHelper.GetParent(obj); return obj as ListBoxItem; }
 
         private static DataTemplate NoteCardTemplate()
         {
             var card = new FrameworkElementFactory(typeof(Border));
             card.SetValue(Border.BackgroundProperty, Brushes.White); card.SetValue(Border.BorderBrushProperty, Ui.Brush("#E5E7EB")); card.SetValue(Border.BorderThicknessProperty, new Thickness(1)); card.SetValue(Border.CornerRadiusProperty, new CornerRadius(6)); card.SetValue(Border.PaddingProperty, new Thickness(8)); card.SetValue(FrameworkElement.MarginProperty, new Thickness(4));
+            card.SetBinding(FrameworkElement.ToolTipProperty, new Binding("Identifier"));
             var panel = new FrameworkElementFactory(typeof(DockPanel));
             var thumb = new FrameworkElementFactory(typeof(Border));
             thumb.SetValue(FrameworkElement.WidthProperty, 64d); thumb.SetValue(FrameworkElement.HeightProperty, 48d); thumb.SetValue(Border.CornerRadiusProperty, new CornerRadius(4)); thumb.SetValue(Border.BorderBrushProperty, Ui.Brush("#D1D5DB")); thumb.SetValue(Border.BorderThicknessProperty, new Thickness(1)); thumb.SetBinding(Border.BackgroundProperty, new Binding("ColorHex") { Converter = new ColorBrushConverter() }); thumb.SetValue(DockPanel.DockProperty, Dock.Left);
             var previewText = new FrameworkElementFactory(typeof(TextBlock)); previewText.SetBinding(TextBlock.TextProperty, new Binding("DisplayPreview")); previewText.SetValue(TextBlock.FontSizeProperty, 6d); previewText.SetValue(TextBlock.ForegroundProperty, Ui.Brush("#4B5563")); previewText.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap); previewText.SetValue(TextBlock.MarginProperty, new Thickness(3)); previewText.SetValue(FrameworkElement.MaxHeightProperty, 42d); previewText.SetValue(FrameworkElement.ClipToBoundsProperty, true);
             thumb.AppendChild(previewText); panel.AppendChild(thumb);
             var right = new FrameworkElementFactory(typeof(StackPanel)); right.SetValue(FrameworkElement.MarginProperty, new Thickness(10, 0, 0, 0));
-            var title = new FrameworkElementFactory(typeof(TextBlock)); title.SetBinding(TextBlock.TextProperty, new Binding("DisplayTitle")); title.SetValue(TextBlock.FontSizeProperty, 14d); title.SetValue(TextBlock.FontWeightProperty, FontWeights.SemiBold); title.SetValue(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis); right.AppendChild(title);
+            var title = new FrameworkElementFactory(typeof(TextBlock)); title.SetBinding(TextBlock.TextProperty, new Binding("ManagerTitle")); title.SetValue(TextBlock.FontSizeProperty, 14d); title.SetValue(TextBlock.FontWeightProperty, FontWeights.SemiBold); title.SetValue(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis); right.AppendChild(title);
             var summary = new FrameworkElementFactory(typeof(TextBlock)); summary.SetBinding(TextBlock.TextProperty, new Binding("DisplayPreview")); summary.SetValue(TextBlock.FontSizeProperty, 12d); summary.SetValue(TextBlock.ForegroundProperty, Ui.Brush("#6B7280")); summary.SetValue(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis); summary.SetValue(FrameworkElement.MarginProperty, new Thickness(0, 3, 0, 3)); right.AppendChild(summary);
+            var tagsHost = new FrameworkElementFactory(typeof(ItemsControl)); tagsHost.SetBinding(ItemsControl.ItemsSourceProperty, new Binding("DisplayTags")); tagsHost.SetValue(FrameworkElement.MarginProperty, new Thickness(0, 1, 0, 2));
+            var tagPanel = new FrameworkElementFactory(typeof(WrapPanel));
+            tagsHost.SetValue(ItemsControl.ItemsPanelProperty, new ItemsPanelTemplate(tagPanel));
+            var tagBorder = new FrameworkElementFactory(typeof(Border));
+            tagBorder.SetBinding(Border.BackgroundProperty, new Binding("ColorHex") { Converter = new ColorBrushConverter() }); tagBorder.SetValue(Border.CornerRadiusProperty, new CornerRadius(3)); tagBorder.SetValue(FrameworkElement.MarginProperty, new Thickness(0, 0, 4, 0)); tagBorder.SetValue(Border.PaddingProperty, new Thickness(5, 1, 5, 1));
+            var tagName = new FrameworkElementFactory(typeof(TextBlock)); tagName.SetBinding(TextBlock.TextProperty, new Binding("DisplayName")); tagName.SetBinding(TextBlock.ForegroundProperty, new Binding("ColorHex") { Converter = new ContrastBrushConverter() }); tagName.SetValue(TextBlock.FontSizeProperty, 10d);
+            tagBorder.AppendChild(tagName); tagsHost.SetValue(ItemsControl.ItemTemplateProperty, new DataTemplate(typeof(Tag)) { VisualTree = tagBorder });
+            right.AppendChild(tagsHost);
             var date = new FrameworkElementFactory(typeof(TextBlock)); date.SetBinding(TextBlock.TextProperty, new Binding("DateLabel")); date.SetValue(TextBlock.FontSizeProperty, 11d); date.SetValue(TextBlock.ForegroundProperty, Ui.Brush("#9CA3AF")); right.AppendChild(date);
             panel.AppendChild(right);
             card.AppendChild(panel);
@@ -437,6 +408,12 @@ namespace DeskPins.App
         private sealed class ColorBrushConverter : IValueConverter
         {
             public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture) { return Ui.Brush(value as string); }
+            public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture) { throw new NotSupportedException(); }
+        }
+
+        private sealed class ContrastBrushConverter : IValueConverter
+        {
+            public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture) { return Ui.TextOn(value as string); }
             public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture) { throw new NotSupportedException(); }
         }
     }

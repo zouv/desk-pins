@@ -168,6 +168,15 @@ namespace DeskPins.App
 
             // Management window.
             {"新建", "New"}, {"恢复到桌面", "Restore to desktop"}, {"收藏", "Store"}, {"文件夹…", "Folders…"},
+            {"显示全部", "Show all"},
+            {"新建文件夹", "New folder"}, {"新建子文件夹", "New subfolder"}, {"新建标签", "New tag"},
+            {"文件夹属性", "Folder properties"}, {"堆叠属性", "Stack properties"}, {"标签属性", "Tag properties"},
+            {"名称不能为空。", "Name cannot be empty."},
+            {"删除文件夹“{0}”？其中的便签会移回已收藏。", "Delete folder \"{0}\"? Notes inside will move back to Stored."},
+            {"删除堆叠“{0}”？便签会保留并移出堆叠。", "Delete stack \"{0}\"? Its notes are kept and removed from the stack."},
+            {"删除标签“{0}”？便签内容会保留。", "Delete tag \"{0}\"? Note contents are kept."},
+            {"设置搜索标签过滤", "Set tag filter for search results"}, {"设置以上标签", "Set to tags above"}, {"清除标签", "Clear tags"}, {"没有标签。", "No tags."},
+            {"标签过滤", "Tag filter"}, {"搜索内容", "Search content"}, {"固定查找栏", "Pin find bar"},
             {"联系人…", "Contacts…"}, {"解锁 / 锁定", "Unlock / lock"}, {"设置…", "Settings…"}, {"查找：", "Find:"},
             {"搜索", "Search"}, {"修改时间 ↓", "Modified ↓"}, {"创建时间 ↓", "Created ↓"}, {"标题 A–Z", "Title A–Z"},
             {"提醒时间 ↑", "Reminder ↑"}, {"张便签", "notes"}, {"首页", "Home"}, {"堆叠", "Stacks"}, {"附着", "Attachments"},

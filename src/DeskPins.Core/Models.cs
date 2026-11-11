@@ -38,6 +38,11 @@ namespace DeskPins.Core
         // Encrypted describes the persisted row; this flag only describes the loaded body.
         [IgnoreDataMember] public bool ContentDecrypted;
         public string DisplayTitle { get { return string.IsNullOrWhiteSpace(Title) ? (string.IsNullOrWhiteSpace(Preview) ? (Kind == NoteKind.Image ? "图片便签" : "新便签") : Preview) : Title; } }
+        [IgnoreDataMember] public bool ShowId;
+        [IgnoreDataMember] public List<Tag> DisplayTags { get; set; } = new List<Tag>();
+        public string ShortId { get { return string.IsNullOrEmpty(Id) ? "" : Id.Substring(0, Math.Min(8, Id.Length)); } }
+        public string Identifier { get { return Id; } }
+        public string ManagerTitle { get { return ShowId ? "id " + ShortId + " " + DisplayTitle : DisplayTitle; } }
         [IgnoreDataMember] public bool CompactPreview;
         [IgnoreDataMember] public string ColorHex { get { return Color; } }
         public string DisplayPreview { get { return CompactPreview ? "" : Preview; } }
@@ -84,6 +89,8 @@ namespace DeskPins.Core
     public sealed class Tag
     {
         [DataMember] public string Id = Guid.NewGuid().ToString("N"), Name = "新标签", Color = "#527DA5";
+        public string DisplayName { get { return Name; } }
+        public string ColorHex { get { return Color; } }
     }
     [DataContract]
     public sealed class Friend
@@ -104,7 +111,7 @@ namespace DeskPins.Core
     [DataContract]
     public sealed class Settings
     {
-        [DataMember] public int Version = 2;
+        [DataMember] public int Version = 3;
         [DataMember] public bool Snap = true, OpaqueEditing = true, DoubleClickRoll = true, PreventDuplicates = true;
         [DataMember] public bool AlarmFlash = true, AlarmJiggle, AlarmLoop, Networking, UseDns, EmailEnabled, AutoStart, CompactList;
         [DataMember] public int SnoozeMinutes = 5, NetworkPort = 52673, SmtpPort = 587, BackupHours = 24, ClosedRetentionDays = 0;
@@ -123,6 +130,9 @@ namespace DeskPins.Core
         [DataMember] public Dictionary<int, int> ManagerOrders = new Dictionary<int, int>();
         [DataMember] public Dictionary<int, double> ManagerOutlineWidths = new Dictionary<int, double>();
         [DataMember] public Dictionary<int, double> ManagerListWidths = new Dictionary<int, double>();
+        [DataMember] public bool SearchDesktop = true, SearchAttached = true, SearchStored = true, SearchSleeping = true, SearchClosed = true, SearchRecurring = true;
+        [DataMember] public bool SearchContent = true, SearchPinFindBar, SearchBarExpanded = true;
+        [DataMember] public List<string> SearchTagFilter = new List<string>();
         [DataMember] public bool ShowShadow = true;
         [DataMember] public bool LinksClickable = true, CheckboxTrailingSpace = true, ShiftCtrlDirection = true;
         [DataMember] public string ScreenGrabUi = "Hole in white overlay", ImageSaveType = "PNG";
@@ -146,6 +156,8 @@ namespace DeskPins.Core
             if (ManagerOrders == null) ManagerOrders = new Dictionary<int, int>();
             if (ManagerOutlineWidths == null) ManagerOutlineWidths = new Dictionary<int, double>();
             if (ManagerListWidths == null) ManagerListWidths = new Dictionary<int, double>();
+            if (SearchTagFilter == null) SearchTagFilter = new List<string>();
+            SearchTagFilter.RemoveAll(string.IsNullOrEmpty);
             if (string.IsNullOrWhiteSpace(Language)) Language = "zh-CN";
             if (HighlightColors == null) HighlightColors = new List<string>();
             while (HighlightColors.Count < 7) HighlightColors.Add(new[] { "#FFFF00", "#FF00FF", "#FFC000", "#00FF00", "#00FFFF", "#FF6600", "#CC99FF" }[HighlightColors.Count]);
@@ -173,6 +185,13 @@ namespace DeskPins.Core
                 if (string.IsNullOrWhiteSpace(WakeTopmostMode)) WakeTopmostMode = "current";
                 DoubleClickAction = DoubleClickRoll ? "roll" : "none";
                 Version = 2;
+            }
+            if (Version < 3)
+            {
+                // Search scopes did not exist before v3; keep them enabled instead of turning every checkbox off.
+                SearchDesktop = SearchAttached = SearchStored = SearchSleeping = SearchClosed = SearchRecurring = true;
+                SearchContent = true; SearchBarExpanded = true;
+                Version = 3;
             }
             foreach (var style in Styles) if (style.TabWidth <= 0) style.TabWidth = 50;
         }

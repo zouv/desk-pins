@@ -54,7 +54,7 @@ namespace DeskPins.Tests
             string file = Path.Combine(dir, "store.db"), backup = Path.Combine(dir, "backup.db"); string id;
             using (var lib = new NoteLibrary(file))
             {
-                var n = lib.Create(); id = n.Id; n.Title = "测试便签"; n.Body = Encoding.ASCII.GetBytes(@"{\rtf1 hello}"); n.PlainText = "Unicode 中文_100%"; lib.Save(n); Check(lib.Search("中文_100%").Count() == 1, "Unicode and escaped LIKE search"); Check(lib.Search("' OR 1=1 --").Count() == 0, "parameterized search"); Check(!lib.Search("StateUtc").Any(), "search excludes metadata property names");
+                var n = lib.Create(); id = n.Id; n.Title = "测试便签"; n.Body = Encoding.ASCII.GetBytes(@"{\rtf1 hello}"); n.PlainText = "Unicode 中文_100%"; lib.Save(n); Check(lib.Search("中文_100%").Count() == 1, "Unicode and escaped LIKE search"); Check(lib.Search("' OR 1=1 --").Count() == 0, "parameterized search"); Check(!lib.Search("StateUtc").Any(), "search excludes metadata property names"); Check(lib.Search(id.Substring(0, 8)).Any(x => x.Id == id), "search matches a note id prefix");
                 lib.Move(n, NoteState.Closed); Check(lib.Notes[id].State == NoteState.Closed, "close is recoverable"); lib.Move(n, NoteState.Desktop); Check(lib.Notes[id].Body.Length > 0, "restore retains content");
                 lib.Repository.Backup(backup); n.PlainText = "changed"; lib.Save(n); lib.Repository.ImportBackup(backup, false); lib.Reload(); lib.Load(lib.Notes[id]); Check(lib.Notes[id].PlainText.Contains("中文"), "transactional restore original content");
                 int count = lib.Notes.Count; Throws(() => lib.Repository.Transaction(() => { lib.Repository.Delete(id); throw new IOException("fault injection"); }), "transaction failure"); Check(lib.Repository.LoadMetadata().Count == count, "transaction rollback");
@@ -122,7 +122,7 @@ namespace DeskPins.Tests
             var settings = new Settings { DisabledShortcuts = null }; settings.Normalize();
             Check(settings.DisabledShortcuts != null, "disabled shortcut memory normalizes");
             var migrated = new Settings { Version = 0, DoubleClickRoll = true }; migrated.Normalize();
-            Check(migrated.Version == 2 && migrated.SnapDistance == 10 && migrated.LinksClickable && migrated.ClickMakesVisible && migrated.AlarmSoundEnabled && migrated.HighlightColors.Count == 7 && migrated.DoubleClickAction == "roll", "settings migration keeps new defaults");
+            Check(migrated.Version == 3 && migrated.SnapDistance == 10 && migrated.LinksClickable && migrated.ClickMakesVisible && migrated.AlarmSoundEnabled && migrated.HighlightColors.Count == 7 && migrated.DoubleClickAction == "roll" && migrated.SearchDesktop && migrated.SearchContent && migrated.SearchBarExpanded, "settings migration keeps new defaults");
             var nonRolling = new Settings { Version = 0, DoubleClickRoll = false }; nonRolling.Normalize();
             Check(nonRolling.DoubleClickAction == "none", "legacy double-click preference migrates");
             var dataPath = Path.Combine(Path.GetTempPath(), "deskpins-data-location");
@@ -161,6 +161,10 @@ namespace DeskPins.Tests
             app.Shutdown();
         }
         private static T Field<T>(object instance, string name) { return (T)instance.GetType().GetField(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(instance); }
+        private static void SelectCategory(System.Windows.Controls.ListBox categories, int category)
+        {
+            categories.SelectedItem = categories.Items.Cast<System.Windows.Controls.ListBoxItem>().First(item => (int)item.Tag == category);
+        }
         private static void InteractionTests(AppHost host)
         {
             var first = host.Library.Create(); var second = host.Library.Create();
@@ -180,12 +184,50 @@ namespace DeskPins.Tests
             var manager = new ManagerWindow(host);
             var categories = Field<System.Windows.Controls.ListBox>(manager, "categories"); var listing = Field<System.Windows.Controls.ListBox>(manager, "notes");
             Check(categories.Items.Count == 11, "manager keeps the icon category rail");
-            categories.SelectedIndex = 1; listing.SelectedItems.Add(first); listing.SelectedItems.Add(second); manager.Refresh();
+            Check(categories.Items.Cast<System.Windows.Controls.ListBoxItem>().Select(i => (int)i.Tag).SequenceEqual(new[] { 0, 1, 2, 9, 8, 3, 4, 5, 6, 7, 10 }), "manager rail places tags below stacks and stored below tags");
+            SelectCategory(categories, 1); listing.SelectedItems.Add(first); listing.SelectedItems.Add(second); manager.Refresh();
             Check(listing.SelectedItems.Count == 2, "manager refresh preserves multiple selection");
-            var folder = new Folder { Name = "Collection added while manager is open" }; host.Library.Catalog.Folders.Add(folder); categories.SelectedIndex = 8;
+            var folder = new Folder { Name = "Collection added while manager is open" }; host.Library.Catalog.Folders.Add(folder); SelectCategory(categories, 8);
             var tree = Field<System.Windows.Controls.TreeView>(manager, "tree"); folder.Name = "Renamed collection"; host.Library.SaveCatalog(); manager.Refresh();
             var renamedNode = TreeItems(tree.Items).FirstOrDefault(n => n.Tag is Folder f && f.Id == folder.Id);
             Check(renamedNode != null && ((System.Windows.Controls.Grid)renamedNode.Header).Children.OfType<System.Windows.Controls.TextBlock>().Any(t => t.Text == folder.Name), "manager navigation reflects collection changes");
+            var closedSample = host.Library.Create(); closedSample.Title = "Closed sample"; host.Library.Save(closedSample); host.Library.Move(closedSample, NoteState.Closed); closedSample.ShowId = true;
+            Check(closedSample.ManagerTitle.StartsWith("id " + closedSample.ShortId + " Closed sample"), "closed note title exposes its short id");
+            var firstFolder = new Folder { Name = "Order A" }; var secondFolder = new Folder { Name = "Order B" }; var thirdFolder = new Folder { Name = "Order C" };
+            host.Library.Catalog.Folders.Add(firstFolder); host.Library.Catalog.Folders.Add(secondFolder); host.Library.Catalog.Folders.Add(thirdFolder);
+            var moveCollection = typeof(ManagerWindow).GetMethod("MoveCollectionItem", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            moveCollection.Invoke(manager, new object[] { "folders", thirdFolder.Id, firstFolder, 2 });
+            Check(host.Library.Catalog.Folders.IndexOf(firstFolder) < host.Library.Catalog.Folders.IndexOf(thirdFolder) && host.Library.Catalog.Folders.IndexOf(thirdFolder) < host.Library.Catalog.Folders.IndexOf(secondFolder), "folder drag reorders siblings");
+            moveCollection.Invoke(manager, new object[] { "folders", thirdFolder.Id, secondFolder, 1 });
+            Check(thirdFolder.ParentId == secondFolder.Id, "folder drop inside sets parent");
+            moveCollection.Invoke(manager, new object[] { "folders", secondFolder.Id, thirdFolder, 1 });
+            Check(secondFolder.ParentId != thirdFolder.Id, "folder drag rejects cyclic nesting");
+            var firstStack = new NoteStack { Name = "Order stack A" }; var secondStack = new NoteStack { Name = "Order stack B" };
+            host.Library.Catalog.Stacks.Add(firstStack); host.Library.Catalog.Stacks.Add(secondStack);
+            moveCollection.Invoke(manager, new object[] { "stacks", secondStack.Id, firstStack, 0 });
+            Check(host.Library.Catalog.Stacks.IndexOf(secondStack) < host.Library.Catalog.Stacks.IndexOf(firstStack), "stack drag reorders collection");
+            var firstOrderTag = new Tag { Name = "Order tag A" }; var secondOrderTag = new Tag { Name = "Order tag B" };
+            host.Library.Catalog.Tags.Add(firstOrderTag); host.Library.Catalog.Tags.Add(secondOrderTag);
+            moveCollection.Invoke(manager, new object[] { "tags", firstOrderTag.Id, secondOrderTag, 2 });
+            Check(host.Library.Catalog.Tags.IndexOf(secondOrderTag) < host.Library.Catalog.Tags.IndexOf(firstOrderTag), "tag drag reorders collection");
+            var searchTag = new Tag { Name = "search-tag", Color = "#00AA00" }; host.Library.Catalog.Tags.Add(searchTag);
+            var storedHit = host.Library.Create(); storedHit.Title = "ScopeHit stored"; host.Library.Save(storedHit); host.Library.Move(storedHit, NoteState.Stored, firstFolder.Id);
+            var desktopHit = host.Library.Create(); desktopHit.Title = "ScopeHit desktop"; desktopHit.Tags.Add(searchTag.Id); host.Library.Save(desktopHit); host.Sync();
+            SelectCategory(categories, 10); Field<System.Windows.Controls.TextBox>(manager, "search").Text = "ScopeHit"; manager.Refresh();
+            Check(listing.Items.Cast<Note>().Any(n => n.Id == storedHit.Id) && listing.Items.Cast<Note>().Any(n => n.Id == desktopHit.Id), "search includes stored and desktop notes by default");
+            host.Library.Catalog.Settings.SearchStored = false; manager.Refresh();
+            Check(listing.Items.Cast<Note>().All(n => n.Id != storedHit.Id) && listing.Items.Cast<Note>().Any(n => n.Id == desktopHit.Id), "search scope excludes unchecked stored notes");
+            host.Library.Catalog.Settings.SearchStored = true; host.Library.Catalog.Settings.SearchTagFilter = new System.Collections.Generic.List<string> { searchTag.Id }; manager.Refresh();
+            Check(listing.Items.Cast<Note>().All(n => n.Id != storedHit.Id) && listing.Items.Cast<Note>().Any(n => n.Id == desktopHit.Id), "search tag filter narrows results");
+            host.Library.Catalog.Settings.SearchTagFilter.Clear(); manager.Refresh();
+            var tagDialogType = typeof(ManagerWindow).Assembly.GetType("DeskPins.App.SearchTagWindow");
+            var tagDialog = (Window)Activator.CreateInstance(tagDialogType, new object[] { host, new System.Collections.Generic.List<string>() });
+            Check(Descendants((DependencyObject)tagDialog.Content).OfType<System.Windows.Controls.Button>().Any(b => b.Content.ToString() == "设置以上标签"), "search tag filter dialog exposes filter actions");
+            SelectCategory(categories, 6); manager.Refresh();
+            var calendarHost = Field<System.Windows.Controls.Border>(manager, "calendarHost");
+            var dayButtons = Descendants(calendarHost).OfType<System.Windows.Controls.Button>().Where(b => b.Tag is DateTime).ToList();
+            Check(dayButtons.Count == DateTime.DaysInMonth(DateTime.Today.Year, DateTime.Today.Month), "calendar renders every day of the selected month");
+            SelectCategory(categories, 8); manager.Refresh();
             var imageNote = host.Library.Create(NoteKind.Image); host.Sync(); var imageWindow = host.Windows[imageNote.Id];
             host.Library.Catalog.Settings.Styles[1].Color = "#123456"; host.Library.Catalog.Settings.Styles[1].Topmost = true; imageWindow.ApplyStyle(1);
             Check(host.Library.Repository.LoadMetadata().Single(x => x.Id == imageNote.Id).Color == "#123456", "image note style persists immediately");
@@ -267,13 +309,13 @@ namespace DeskPins.Tests
             var outlineColumn = Field<System.Windows.Controls.ColumnDefinition>(manager, "outlineColumn"); var listColumn = Field<System.Windows.Controls.ColumnDefinition>(manager, "listColumn");
             host.Library.Catalog.Settings.ManagerOutlineWidths[2] = 250; host.Library.Catalog.Settings.ManagerListWidths[2] = 350;
             host.Library.Catalog.Settings.ManagerOutlineWidths[8] = 230; host.Library.Catalog.Settings.ManagerListWidths[8] = 320;
-            categories.SelectedIndex = 2; manager.Refresh();
+            SelectCategory(categories, 2); manager.Refresh();
             Check(Math.Abs(outlineColumn.Width.Value - 250) < .1 && Math.Abs(listColumn.Width.Value - 350) < .1, "manager restores stack pane widths");
-            categories.SelectedIndex = 8; manager.Refresh();
+            SelectCategory(categories, 8); manager.Refresh();
             Check(Math.Abs(outlineColumn.Width.Value - 230) < .1 && Math.Abs(listColumn.Width.Value - 320) < .1, "manager restores stored pane widths separately");
             host.Library.Catalog.Settings.ManagerOutlineWidths[2] = 220; host.Library.Catalog.Settings.ManagerListWidths[2] = 340;
             host.Library.Catalog.Settings.ManagerOutlineWidths[8] = 220; host.Library.Catalog.Settings.ManagerListWidths[8] = 340; manager.Refresh();
-            host.Library.Move(note, NoteState.Stored); categories.SelectedIndex = 8; manager.Refresh(); notes.SelectedItem = note;
+            host.Library.Move(note, NoteState.Stored); SelectCategory(categories, 8); manager.Refresh(); notes.SelectedItem = note;
             Layout(manager, 900, 520, "manager-minimum"); Check(notes.ActualWidth >= 200 && preview.ActualWidth >= 200, "manager minimum size keeps list and content usable");
             Layout(manager, 1180, 720, "manager-default"); Check(notes.ActualWidth >= 200 && preview.ActualWidth > 300, "manager content grows with window");
             var reminder = new ScheduleWindow(host, note, true, true); var controls = Descendants((DependencyObject)reminder.Content).ToArray(); var combos = controls.OfType<System.Windows.Controls.ComboBox>().ToArray();
@@ -331,7 +373,7 @@ namespace DeskPins.Tests
             Check(host.Library.Catalog.Settings.Language == "zh-CN", "settings save commits the selected language");
             foreach (var kind in new[] { "folders", "friends", "tags" }) { var collection = new CollectionsWindow(host, kind); Layout(collection, 444, 280, "collection-" + kind); Check(Descendants((DependencyObject)collection.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "关闭").IsCancel, "collection keyboard close " + kind); collection.Close(); }
             var attachment = new AttachWindow(host, note); Descendants((DependencyObject)attachment.Content).OfType<System.Windows.Controls.ListBox>().Single().ItemsSource = new[] { new WindowInfo { Title = "Sample document — Editor", Class = "SampleEditor" } }; Layout(attachment, 524, 360, "attachment"); Check(Descendants((DependencyObject)attachment.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "确定").IsDefault, "attachment supports Enter confirm");
-            for (int category = 0; category <= 10; category++) { categories.SelectedIndex = category; Layout(manager, 900, 520, "manager-category-" + category); Check(category == 0 ? homeView.ActualWidth >= 500 : notes.ActualWidth >= 200 && preview.ActualWidth >= 200, "minimum manager layout in category " + category); }
+            for (int category = 0; category <= 10; category++) { SelectCategory(categories, category); Layout(manager, 900, 520, "manager-category-" + category); Check(category == 0 ? homeView.ActualWidth >= 500 : notes.ActualWidth >= 200 && preview.ActualWidth >= 200, "minimum manager layout in category " + category); }
             var noteWindow = host.Windows.Values.First(w => w.TextEditor != null); noteWindow.TextEditor.InsertText("Sample note\n☐ Task one\n☑ Task two"); Layout(noteWindow, 260, 190, "note-text"); Check(noteWindow.TextEditor.ActualHeight > 100, "text note keeps editable body below title"); noteWindow.ToggleRoll(); Layout(noteWindow, 260, 24, "note-rolled"); noteWindow.ToggleRoll();
             var imageWindow = host.Windows.Values.First(w => w.ImageEditor != null); Layout(imageWindow, 260, 190, "note-image"); Check(imageWindow.ImageEditor.ActualWidth >= 250, "image note keeps canvas scrollable");
             var stack = new StackWindow(host, new NoteStack { Name = "Sample stack with a long title that must be trimmed", Width = 240, Height = 60 }); stack.Refresh(); Check(Math.Abs(stack.Width - 240) < .1 && Math.Abs(stack.Height - 60) < .1, "stack window restores its saved size"); Layout(stack, 240, 60, "stack"); stack.Close();
