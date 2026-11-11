@@ -27,6 +27,8 @@ namespace DeskPins.App
         public Color PenColor = Colors.Red, BackgroundColor = Color.FromRgb(255, 255, 180);
         public double PenWidth = 3, Scale = 1;
         public int Number = 1;
+        public int MaxUndo = 5;
+        public string SaveFormat = "PNG";
         public Rect Selection = Rect.Empty;
         public event Action Changed;
         public BitmapSource Image { get { return image; } }
@@ -41,7 +43,7 @@ namespace DeskPins.App
         public void Read(byte[] bytes) { CancelEdit(); undo.Clear(); redo.Clear(); Selection = Rect.Empty; if (bytes != null && bytes.Length > 0) { using (var s = new MemoryStream(bytes)) { var decoder = BitmapDecoder.Create(s, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad); image = new FormatConvertedBitmap(decoder.Frames[0], PixelFormats.Bgra32, null, 0); image.Freeze(); } } else Blank(250, 160); InvalidateMeasure(); InvalidateVisual(); }
         public void CancelEdit() { if (drawing) { if (strokeOriginal != null) image = strokeOriginal; Selection = previousSelection; } drawing = false; strokeOriginal = null; pasted = null; ReleaseMouseCapture(); InvalidateVisual(); }
         public void Blank(int width, int height) { var pixels = new byte[width * height * 4]; for (int i = 0; i < pixels.Length; i += 4) { pixels[i] = BackgroundColor.B; pixels[i + 1] = BackgroundColor.G; pixels[i + 2] = BackgroundColor.R; pixels[i + 3] = 255; } image = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, width * 4); image.Freeze(); }
-        public byte[] Bytes() { using (var s = new MemoryStream()) { var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(image)); encoder.Save(s); return s.ToArray(); } }
+        public byte[] Bytes() { using (var s = new MemoryStream()) { BitmapEncoder encoder = String.Equals(SaveFormat, "JPEG", StringComparison.OrdinalIgnoreCase) ? (BitmapEncoder)new JpegBitmapEncoder() : String.Equals(SaveFormat, "BMP", StringComparison.OrdinalIgnoreCase) ? new BmpBitmapEncoder() : String.Equals(SaveFormat, "TIFF", StringComparison.OrdinalIgnoreCase) ? (BitmapEncoder)new TiffBitmapEncoder() : new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(image)); encoder.Save(s); return s.ToArray(); } }
         public void Replace(BitmapSource source) { if (Locked || source == null) return; Remember(); image = new FormatConvertedBitmap(source, PixelFormats.Bgra32, null, 0); image.Freeze(); Selection = Rect.Empty; Notify(); }
         public void PasteInto(BitmapSource source) { if (Locked || source == null) return; pasted = source; Focus(); InvalidateVisual(); }
         public void AddBorder(int width = 3) { if (Locked) return; Remember(); var original = image; Blank(image.PixelWidth + width * 2, image.PixelHeight + width * 2); Draw(d => d.DrawImage(original, new Point(width, width))); }
@@ -112,7 +114,7 @@ namespace DeskPins.App
             image = BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgra32, null, pixels, w * 4); image.Freeze(); Notify();
         }
         private void Draw(Action<RasterCanvas> action, bool notify = true) { using (var raster = new RasterCanvas(image)) { action(raster); image = raster.Result(); } if (notify) Notify(); else InvalidateVisual(); }
-        private void Remember(BitmapSource before = null) { undo.Push(before ?? image); redo.Clear(); var all = undo.ToArray(); long bytes = 0; int keep = 0; for (int i = 0; i < all.Length && i < 40; i++) { bytes += (long)all[i].PixelWidth * all[i].PixelHeight * 4; if (i > 0 && bytes > 64L * 1024 * 1024) break; keep++; } undo.Clear(); for (int i = keep - 1; i >= 0; i--) undo.Push(all[i]); }
+        private void Remember(BitmapSource before = null) { undo.Push(before ?? image); redo.Clear(); var all = undo.ToArray(); long bytes = 0; int keep = 0; int limit = Math.Max(1, Math.Min(MaxUndo, 40)); for (int i = 0; i < all.Length && i < limit; i++) { bytes += (long)all[i].PixelWidth * all[i].PixelHeight * 4; if (i > 0 && bytes > 64L * 1024 * 1024) break; keep++; } undo.Clear(); for (int i = keep - 1; i >= 0; i--) undo.Push(all[i]); }
         private void Notify() { InvalidateMeasure(); InvalidateVisual(); var changed = Changed; if (changed != null) changed(); }
     }
 }

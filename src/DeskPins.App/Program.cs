@@ -16,7 +16,7 @@ namespace DeskPins.App
         [STAThread]
         public static int Main(string[] args)
         {
-            var clock = Stopwatch.StartNew(); string data = Option(args, "--data-dir") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DeskPins"); string command = Option(args, "--api");
+            var clock = Stopwatch.StartNew(); string data = DataLocation.Resolve(Option(args, "--data-dir")); string command = Option(args, "--api");
             if (command != null) { try { string result = ApiService.Client(data, command); string output = Option(args, "--output"); if (output != null) File.WriteAllText(output, result); return result.StartsWith("997") ? 2 : 0; } catch (Exception ex) { if (Option(args, "--output") != null) File.WriteAllText(Option(args, "--output"), ex.Message); return 2; } }
             bool test = args.Contains("--render") || args.Contains("--benchmark"); string identity = "Local\\" + ApiService.Identity(data); bool owner;
             if (test && Option(args, "--data-dir") == null) return 2;
@@ -39,7 +39,7 @@ namespace DeskPins.App
                     else { bool existing = host.Library.Notes.Count > 0; host.Start(); foreach (var file in args.Where(File.Exists)) host.Import(file); if (existing && args.Contains("-")) host.New(); if (args.Contains("-showmanage")) host.Manage(); if (args.Contains("-showsettings")) host.Settings(); if (args.Contains("-showhideall")) host.ToggleAll(); if (args.Contains("-rescue")) host.Rescue(); if (args.Contains("-newstickyfromscreen")) application.Dispatcher.BeginInvoke(new Action(host.Capture)); }
                     application.Run(); return 0;
                 }
-                catch (Exception ex) { if (host != null) host.Dispose(); MessageBox.Show(ex.Message + "\n\n数据文件未被重置。", "DeskPins 启动失败", MessageBoxButton.OK, MessageBoxImage.Error); return 1; }
+                catch (Exception ex) { if (host != null) host.Dispose(); MessageBox.Show(Ui.Text(ex.Message) + "\n\n" + Ui.Text("数据文件未被重置。"), Ui.Text("DeskPins 启动失败"), MessageBoxButton.OK, MessageBoxImage.Error); return 1; }
                 finally { if (owner) mutex.ReleaseMutex(); }
             }
         }

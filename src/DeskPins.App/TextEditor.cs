@@ -18,6 +18,8 @@ namespace DeskPins.App
     {
         private static readonly DependencyProperty[] formatProperties = { TextElement.FontFamilyProperty, TextElement.FontSizeProperty, TextElement.FontWeightProperty, TextElement.FontStyleProperty, TextElement.ForegroundProperty, Inline.TextDecorationsProperty };
         private static object[] copiedFormat;
+        public bool LinksClickable = true;
+        public bool CheckboxTrailingSpace = true;
         public string PlainText { get { return new TextRange(Document.ContentStart, Document.ContentEnd).Text.TrimEnd('\r', '\n'); } }
         public string SelectedPlainText { get { return Selection.IsEmpty ? PlainText : Selection.Text; } }
         public void CopyFormat() { copiedFormat = formatProperties.Select(p => Selection.GetPropertyValue(p)).ToArray(); }
@@ -28,15 +30,36 @@ namespace DeskPins.App
         {
             BorderThickness = new Thickness(0); Padding = new Thickness(7, 3, 7, 5); AcceptsTab = true; IsDocumentEnabled = true;
             Document = new FlowDocument { PagePadding = new Thickness(0) };
-            AddHandler(Hyperlink.RequestNavigateEvent, new System.Windows.Navigation.RequestNavigateEventHandler((s, e) => { OpenLink(e.Uri); e.Handled = true; }));
+            ApplyParagraphStyle(Document);
+            AddHandler(Hyperlink.RequestNavigateEvent, new System.Windows.Navigation.RequestNavigateEventHandler((s, e) => { if (LinksClickable) OpenLink(e.Uri); e.Handled = true; }));
             PreviewMouseDoubleClick += DoubleClick;
+            TextChanged += (s, e) => NormalizeParagraphMargins();
+        }
+        private static void ApplyParagraphStyle(FlowDocument document)
+        {
+            var style = new Style(typeof(Paragraph));
+            style.Setters.Add(new Setter(Block.MarginProperty, new Thickness(0)));
+            document.Resources[typeof(Paragraph)] = style;
+        }
+        private void NormalizeParagraphMargins()
+        {
+            foreach (var block in Document.Blocks) NormalizeBlock(block);
+        }
+        private static void NormalizeBlock(Block block)
+        {
+            var paragraph = block as Paragraph;
+            if (paragraph != null) { if (paragraph.Margin != new Thickness(0)) paragraph.Margin = new Thickness(0); return; }
+            var list = block as List;
+            if (list != null) foreach (ListItem item in list.ListItems) foreach (var child in item.Blocks) NormalizeBlock(child);
         }
         public void Read(Note n)
         {
             Document = new FlowDocument { PagePadding = new Thickness(0), FontFamily = new FontFamily(n.FontName), FontSize = n.FontSize };
+            ApplyParagraphStyle(Document);
             var range = new TextRange(Document.ContentStart, Document.ContentEnd);
             if (n.Body != null && n.Body.Length > 0) { using (var s = new MemoryStream(n.Body)) { try { range.Load(s, DataFormats.Rtf); } catch (ArgumentException) { range.Text = n.PlainText ?? Encoding.UTF8.GetString(n.Body); } } }
             else range.Text = n.PlainText ?? "";
+            NormalizeParagraphMargins();
             Foreground = Ui.Brush(n.Foreground); IsReadOnly = n.Locked;
         }
         public void Write(Note n)
@@ -75,7 +98,7 @@ namespace DeskPins.App
                 case "ltr": Selection.ApplyPropertyValue(FlowDocument.FlowDirectionProperty, FlowDirection.LeftToRight); break;
                 case "rtl": Selection.ApplyPropertyValue(FlowDocument.FlowDirectionProperty, FlowDirection.RightToLeft); break;
                 case "date": InsertText(DateTime.Now.ToString("yyyy-MM-dd HH:mm")); break;
-                case "checkbox": InsertText("☐ "); break;
+                case "checkbox": InsertText(CheckboxTrailingSpace ? "☐ " : "☐"); break;
                 case "rule": InsertText("\n────────────────────\n"); break;
                 case "link": Link(); break;
             }
@@ -95,6 +118,19 @@ namespace DeskPins.App
         public void Scale(double factor)
         {
             if (IsReadOnly) return; var range = Selection.IsEmpty ? new TextRange(Document.ContentStart, Document.ContentEnd) : Selection; object current = range.GetPropertyValue(TextElement.FontSizeProperty); double size = current is double ? (double)current : FontSize; range.ApplyPropertyValue(TextElement.FontSizeProperty, Math.Max(6, Math.Min(200, size * factor)));
+        }
+        public void Highlight(string color)
+        {
+            if (IsReadOnly) return;
+            var range = Selection.IsEmpty ? new TextRange(Document.ContentStart, Document.ContentEnd) : Selection;
+            range.ApplyPropertyValue(TextElement.BackgroundProperty, string.IsNullOrWhiteSpace(color) ? null : Ui.Brush(color));
+        }
+        public void ToggleDirection()
+        {
+            if (IsReadOnly) return;
+            var range = Selection.IsEmpty ? new TextRange(Document.ContentStart, Document.ContentEnd) : Selection;
+            FlowDirection direction = Document.FlowDirection == FlowDirection.LeftToRight ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
+            range.ApplyPropertyValue(FlowDocument.FlowDirectionProperty, direction);
         }
         public bool Find(string term)
         {
@@ -123,6 +159,7 @@ namespace DeskPins.App
             var p = GetPositionFromPoint(e.GetPosition(this), true); if (p == null) return;
             var next = p.GetPositionAtOffset(1, LogicalDirection.Forward); if (next == null) return; var r = new TextRange(p, next);
             if (!IsReadOnly && (r.Text == "☐" || r.Text == "☑")) { r.Text = r.Text == "☐" ? "☑" : "☐"; e.Handled = true; return; }
+            if (!LinksClickable) return;
             var run = p.Parent as Run; if (run != null) { var match = Regex.Match(run.Text, @"(?:https?://|mailto:|file:///)[^\s<>]+", RegexOptions.IgnoreCase); if (match.Success) { Uri uri; if (Uri.TryCreate(match.Value, UriKind.Absolute, out uri)) { OpenLink(uri); e.Handled = true; } } }
         }
         public static void OpenLink(Uri uri) { if (uri == null || !(new[] { "http", "https", "mailto", "file" }).Contains(uri.Scheme)) return; try { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); } catch (Exception ex) { Ui.Error(ex); } }

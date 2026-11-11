@@ -20,13 +20,14 @@ namespace DeskPins.App
             public Point StartScreen;
             public double ScaleX = 1, ScaleY = 1;
             public Func<bool> VerticalEnabled;
+            public Func<bool> ResizeEnabled;
             public Action Started, Completed;
             public Cursor HoverCursor;
         }
 
-        public static void Attach(Window window, double minWidth, double minHeight, Func<bool> verticalEnabled = null, Action started = null, Action completed = null)
+        public static void Attach(Window window, double minWidth, double minHeight, Func<bool> verticalEnabled = null, Action started = null, Action completed = null, Func<bool> resizeEnabled = null)
         {
-            var session = new Session { Window = window, VerticalEnabled = verticalEnabled, Started = started, Completed = completed };
+            var session = new Session { Window = window, VerticalEnabled = verticalEnabled, Started = started, Completed = completed, ResizeEnabled = resizeEnabled };
             window.PreviewMouseLeftButtonDown += (s, e) => Start(session, e, minWidth, minHeight);
             window.PreviewMouseMove += (s, e) => Move(session, e, minWidth, minHeight);
             window.PreviewMouseLeftButtonUp += (s, e) => Finish(session, e);
@@ -38,6 +39,7 @@ namespace DeskPins.App
         private static void Start(Session session, MouseButtonEventArgs e, double minWidth, double minHeight)
         {
             if (session.Active || e.ChangedButton != MouseButton.Left) return;
+            if (session.ResizeEnabled != null && !session.ResizeEnabled()) return;
             var window = session.Window;
             var point = e.GetPosition(window);
             double width = Math.Max(1, window.ActualWidth), height = Math.Max(1, window.ActualHeight);

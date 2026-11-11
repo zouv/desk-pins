@@ -121,6 +121,18 @@ namespace DeskPins.Tests
             Check(catalog.Stacks[0].Width == 180 && catalog.Stacks[0].Height == 44, "legacy stack sizes receive defaults");
             var settings = new Settings { DisabledShortcuts = null }; settings.Normalize();
             Check(settings.DisabledShortcuts != null, "disabled shortcut memory normalizes");
+            var migrated = new Settings { Version = 0, DoubleClickRoll = true }; migrated.Normalize();
+            Check(migrated.Version == 2 && migrated.SnapDistance == 10 && migrated.LinksClickable && migrated.ClickMakesVisible && migrated.AlarmSoundEnabled && migrated.HighlightColors.Count == 7 && migrated.DoubleClickAction == "roll", "settings migration keeps new defaults");
+            var nonRolling = new Settings { Version = 0, DoubleClickRoll = false }; nonRolling.Normalize();
+            Check(nonRolling.DoubleClickAction == "none", "legacy double-click preference migrates");
+            var dataPath = Path.Combine(Path.GetTempPath(), "deskpins-data-location");
+            Check(DataLocation.Same(dataPath + "\\", dataPath) && DataLocation.Resolve(dataPath) == Path.GetFullPath(dataPath), "data directory resolution and comparison");
+            var pointerFile = Path.Combine(Path.GetTempPath(), "deskpins-pointer-" + Guid.NewGuid().ToString("N") + ".txt");
+            var customData = Path.Combine(Path.GetTempPath(), "deskpins-custom-data");
+            DataLocation.SetCustom(customData, pointerFile);
+            Check(File.Exists(pointerFile) && DataLocation.Resolve(null, pointerFile) == Path.GetFullPath(customData), "custom data directory pointer round trip");
+            DataLocation.SetCustom(DataLocation.DefaultDirectory, pointerFile);
+            Check(!File.Exists(pointerFile), "returning to default data directory clears pointer");
             var gesture = (System.Windows.Input.KeyGesture)new System.Windows.Input.KeyGestureConverter().ConvertFromString("Ctrl+Alt+Win+Shift+K");
             Check(gesture.Key == System.Windows.Input.Key.K && gesture.Modifiers == (System.Windows.Input.ModifierKeys.Control | System.Windows.Input.ModifierKeys.Alt | System.Windows.Input.ModifierKeys.Windows | System.Windows.Input.ModifierKeys.Shift), "Win modifier shortcut parses");
         }
@@ -153,13 +165,27 @@ namespace DeskPins.Tests
         {
             var first = host.Library.Create(); var second = host.Library.Create();
             host.Focus(first); Check(System.Windows.Input.FocusManager.GetFocusedElement(host.Windows[first.Id]) == host.Windows[first.Id].TextEditor, "focusing note targets text editor for immediate typing");
+            var copyTarget = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(host.Library.Repository.FilePath)), "data-copy-target");
+            var copyPointer = Path.Combine(copyTarget, "pointer.txt");
+            host.ApplyDataDirectory(copyTarget, copyPointer);
+            Check(File.Exists(Path.Combine(copyTarget, "deskpins.db")) && File.ReadAllText(copyPointer).Trim() == Path.GetFullPath(copyTarget), "data directory migration copies database and pointer");
+            var firstWindow = host.Windows[first.Id];
+            Ui.LoadLanguage("en-US");
+            Check(Ui.Text("管理便签…") == "Manage notes…", "tray and note manage label translates");
+            typeof(AppHost).GetMethod("RefreshLanguageSurfaces", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(host, null);
+            Check(Field<System.Windows.Controls.Button>(firstWindow, "closeButton").ToolTip.ToString() == "Close note (recoverable)", "language refresh updates live note chrome");
+            Ui.LoadLanguage("zh-CN");
+            typeof(AppHost).GetMethod("RefreshLanguageSurfaces", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(host, null);
+            Check(Field<System.Windows.Controls.Button>(firstWindow, "closeButton").ToolTip.ToString() == "关闭便签（可恢复）", "language refresh restores live note chrome");
             var manager = new ManagerWindow(host);
             var categories = Field<System.Windows.Controls.ListBox>(manager, "categories"); var listing = Field<System.Windows.Controls.ListBox>(manager, "notes");
+            Check(categories.Items.Count == 11, "manager keeps the icon category rail");
             categories.SelectedIndex = 1; listing.SelectedItems.Add(first); listing.SelectedItems.Add(second); manager.Refresh();
             Check(listing.SelectedItems.Count == 2, "manager refresh preserves multiple selection");
             var folder = new Folder { Name = "Collection added while manager is open" }; host.Library.Catalog.Folders.Add(folder); categories.SelectedIndex = 8;
             var tree = Field<System.Windows.Controls.TreeView>(manager, "tree"); folder.Name = "Renamed collection"; host.Library.SaveCatalog(); manager.Refresh();
-            Check(((System.Windows.Controls.TreeViewItem)tree.Items[tree.Items.Count - 1]).Header.ToString() == folder.Name, "manager navigation reflects collection changes");
+            var renamedNode = TreeItems(tree.Items).FirstOrDefault(n => n.Tag is Folder f && f.Id == folder.Id);
+            Check(renamedNode != null && ((System.Windows.Controls.Grid)renamedNode.Header).Children.OfType<System.Windows.Controls.TextBlock>().Any(t => t.Text == folder.Name), "manager navigation reflects collection changes");
             var imageNote = host.Library.Create(NoteKind.Image); host.Sync(); var imageWindow = host.Windows[imageNote.Id];
             host.Library.Catalog.Settings.Styles[1].Color = "#123456"; host.Library.Catalog.Settings.Styles[1].Topmost = true; imageWindow.ApplyStyle(1);
             Check(host.Library.Repository.LoadMetadata().Single(x => x.Id == imageNote.Id).Color == "#123456", "image note style persists immediately");
@@ -172,20 +198,41 @@ namespace DeskPins.Tests
             Check(textWindow.TextEditor.SelectedPlainText.Contains("latest unflushed text"), "plain copy source uses current editor content");
             host.Library.Catalog.Settings.Shortcuts["copy"] = "";
             Check(host.ShortcutFor("copy") == "" && host.ActionFor(System.Windows.Input.Key.C, System.Windows.Input.ModifierKeys.Control) == null, "empty shortcut disables dispatch");
+            host.Library.Catalog.Settings.Shortcuts["copy"] = "Q";
+            Check(host.ShortcutFor("copy") == "Q" && host.ActionFor(System.Windows.Input.Key.Q, System.Windows.Input.ModifierKeys.None) == "copy", "plain letter shortcut parses");
             host.Library.Catalog.Settings.Shortcuts["copy"] = "Ctrl+Alt+C";
             var textMenu = (System.Windows.Controls.ContextMenu)typeof(NoteWindow).GetMethod("TextMenu", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(textWindow, null);
             Check(((System.Windows.Controls.MenuItem)textMenu.Items[1]).InputGestureText == "Ctrl+Alt+C" && host.ActionFor(System.Windows.Input.Key.C, System.Windows.Input.ModifierKeys.Control | System.Windows.Input.ModifierKeys.Alt) == "copy", "menu shortcut matches configured keyboard action"); host.Library.Catalog.Settings.Shortcuts.Remove("copy");
+            var noteMenu = (System.Windows.Controls.ContextMenu)typeof(NoteWindow).GetMethod("Menu", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(textWindow, null);
+            var opacityMenu = noteMenu.Items.OfType<System.Windows.Controls.MenuItem>().First(m => m.Header.ToString() == "不透明度");
+            opacityMenu.Items.OfType<System.Windows.Controls.MenuItem>().First(m => m.Header.ToString() == "50%").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.MenuItem.ClickEvent));
+            Check(textNote.Opacity == .5 && Field<bool>(textWindow, "showOpacity"), "opacity menu applies immediately during active editing");
+            Check(Math.Abs(textWindow.Opacity - .5) < .01, "opacity menu updates the live window opacity");
+            opacityMenu.Items.OfType<System.Windows.Controls.MenuItem>().First(m => m.Header.ToString() == "100%").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.MenuItem.ClickEvent));
+            Check(textNote.Opacity == 1, "opacity menu can restore full opacity");
+            var spacingEditor = new TextEditor(); new System.Windows.Documents.TextRange(spacingEditor.Document.ContentStart, spacingEditor.Document.ContentEnd).Text = "abc\ndef\nabc\ndef";
+            Check(spacingEditor.Document.Blocks.OfType<System.Windows.Documents.Paragraph>().All(p => p.Margin == new Thickness(0)), "text editor removes paragraph auto margins");
+            var spacingNote = new Note(); spacingEditor.Write(spacingNote); var spacingReloaded = new TextEditor(); spacingReloaded.Read(spacingNote);
+            Check(spacingReloaded.Document.Blocks.OfType<System.Windows.Documents.Paragraph>().All(p => p.Margin == new Thickness(0)), "loaded text keeps compact paragraph spacing");
             var rich = new TextEditor(); rich.Document.Blocks.Clear(); var paragraph = new System.Windows.Documents.Paragraph(); paragraph.Inlines.Add(new System.Windows.Documents.Run("mixed ")); paragraph.Inlines.Add(new System.Windows.Documents.Run("format") { FontWeight = FontWeights.Bold }); paragraph.Inlines.Add(new System.Windows.Documents.Run(" search")); rich.Document.Blocks.Add(paragraph);
             Check(rich.Find("mixed format") && rich.Selection.Text == "mixed format", "find spans differently formatted runs");
             var embedded = new TextEditor(); embedded.InsertText("Image inside text: "); embedded.InsertImage(imageWindow.ImageEditor.Image); var saved = new Note(); embedded.Write(saved); var reloaded = new TextEditor(); reloaded.Read(saved);
             Check(Descendants(reloaded.Document).OfType<System.Windows.Controls.Image>().Any(), "embedded text image survives RTF save and reload");
             rich.Selection.Select(rich.Document.ContentEnd, rich.Document.ContentEnd); Check(rich.Find("mixed format"), "find wraps after document end");
-            var canvas = new ImageEditor(); canvas.Read(new byte[0]); byte[] blank = canvas.Bytes(); int changes = 0; canvas.Changed += () => changes++;
-            canvas.BeginStroke(new Point(10, 10)); canvas.ContinueStroke(new Point(25, 25)); canvas.CancelEdit(); Check(canvas.Bytes().SequenceEqual(blank) && changes == 0, "cancel restores incomplete image stroke");
+            var jpegEditor = new ImageEditor { SaveFormat = "JPEG" }; jpegEditor.Read(new byte[0]); var jpegBytes = jpegEditor.Bytes(); Check(jpegBytes.Length > 2 && jpegBytes[0] == 0xFF && jpegBytes[1] == 0xD8, "image note save format follows settings");
+            var canvas = new ImageEditor(); canvas.Read(new byte[0]); byte[] blank = canvas.Bytes(); int changes = 0; canvas.Changed += () => changes++;            canvas.BeginStroke(new Point(10, 10)); canvas.ContinueStroke(new Point(25, 25)); canvas.CancelEdit(); Check(canvas.Bytes().SequenceEqual(blank) && changes == 0, "cancel restores incomplete image stroke");
             canvas.BeginStroke(new Point(10, 10)); canvas.ContinueStroke(new Point(25, 25)); canvas.Locked = true; Check(canvas.Bytes().SequenceEqual(blank), "locking canvas cancels incomplete stroke"); canvas.Locked = false;
             canvas.BeginStroke(new Point(10, 10)); canvas.CommitStroke(new Point(10, 10)); Check(!canvas.Bytes().SequenceEqual(blank) && changes == 1, "single pen click draws a dot"); canvas.Undo(); Check(canvas.Bytes().SequenceEqual(blank), "committed stroke undo restores image"); canvas.Undo(true);
             canvas.Tool = ImageTool.Select; canvas.BeginStroke(new Point(0, 0)); canvas.CommitStroke(new Point(250, 160)); Check(canvas.Selection.Width == 250 && canvas.Selection.Height == 160 && changes == 3, "selection reaches image edges without content change"); canvas.Undo(); Check(canvas.Bytes().SequenceEqual(blank), "selection does not consume drawing undo");
-            var settings = new Settings(); settings.Normalize(); settings.Shortcuts["new"] = "Ctrl+C"; Throws(() => host.ValidateSettings(settings), "shortcut conflicts with defaults rejected"); settings.Shortcuts.Clear(); settings.GlobalNewKey = settings.GlobalToggleKey = "Ctrl+Alt+N"; Throws(() => host.ValidateSettings(settings), "duplicate global shortcuts rejected"); settings.GlobalToggleKey = "invalid shortcut"; Throws(() => host.ValidateSettings(settings), "invalid global shortcut rejected before saving"); settings.GlobalNewKey = settings.GlobalToggleKey = ""; settings.TomorrowHour = 24; Throws(() => host.ValidateSettings(settings), "invalid tomorrow hour rejected before normalization");
+            var settings = new Settings(); settings.Normalize(); settings.Shortcuts["new"] = "Ctrl+C"; Throws(() => host.ValidateSettings(settings), "shortcut conflicts with defaults rejected"); settings.Shortcuts.Clear(); settings.Shortcuts["new"] = "Q"; host.ValidateSettings(settings); settings.Shortcuts.Clear(); settings.GlobalNewKey = "Q"; settings.GlobalToggleKey = settings.GlobalManageKey = ""; Throws(() => host.ValidateSettings(settings), "plain global shortcut rejected"); settings.GlobalNewKey = settings.GlobalToggleKey = "Ctrl+Alt+N"; Throws(() => host.ValidateSettings(settings), "duplicate global shortcuts rejected"); settings.GlobalToggleKey = "invalid shortcut"; Throws(() => host.ValidateSettings(settings), "invalid global shortcut rejected before saving"); settings.GlobalNewKey = settings.GlobalToggleKey = ""; settings.TomorrowHour = 24; Throws(() => host.ValidateSettings(settings), "invalid tomorrow hour rejected before normalization");
+            var snapNote = host.Library.Create(); host.Sync(); var snapWindow = host.Windows[snapNote.Id]; host.Select(snapNote, false);
+            var workArea = SystemParameters.WorkArea;
+            foreach (var other in host.Windows.Values.Where(w => w != snapWindow)) { other.Left = 10000; other.Top = 10000; }
+            snapWindow.Left = workArea.Left + 4; snapWindow.Top = workArea.Top + 120;
+            host.SnapAfterDrag(snapWindow, false);
+            Check(Math.Abs(snapWindow.Left - workArea.Left) < .1 && Math.Abs(snapNote.Left - workArea.Left) < .1, "snap applies on drag release");
+            snapWindow.Left = workArea.Left + 4; host.SnapAfterDrag(snapWindow, true);
+            Check(Math.Abs(snapWindow.Left - (workArea.Left + 4)) < .1, "Alt suppresses release snap");
             LayoutTests(host, manager, first);
             manager.Close();
         }
@@ -193,6 +240,14 @@ namespace DeskPins.Tests
         {
             yield return root;
             foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>()) foreach (var descendant in Descendants(child)) yield return descendant;
+        }
+        private static System.Collections.Generic.IEnumerable<System.Windows.Controls.TreeViewItem> TreeItems(System.Windows.Controls.ItemCollection items)
+        {
+            foreach (System.Windows.Controls.TreeViewItem item in items)
+            {
+                yield return item;
+                foreach (var child in TreeItems(item.Items)) yield return child;
+            }
         }
         private static FrameworkElement Layout(Window window, double width, double height, string name)
         {
@@ -208,10 +263,19 @@ namespace DeskPins.Tests
         }
         private static void LayoutTests(AppHost host, ManagerWindow manager, Note note)
         {
-            var categories = Field<System.Windows.Controls.ListBox>(manager, "categories"); var preview = Field<System.Windows.Controls.ContentControl>(manager, "preview"); var notes = Field<System.Windows.Controls.ListBox>(manager, "notes");
+            var categories = Field<System.Windows.Controls.ListBox>(manager, "categories"); var preview = Field<System.Windows.Controls.ContentControl>(manager, "preview"); var notes = Field<System.Windows.Controls.ListBox>(manager, "notes"); var homeView = Field<System.Windows.Controls.ScrollViewer>(manager, "homeView");
+            var outlineColumn = Field<System.Windows.Controls.ColumnDefinition>(manager, "outlineColumn"); var listColumn = Field<System.Windows.Controls.ColumnDefinition>(manager, "listColumn");
+            host.Library.Catalog.Settings.ManagerOutlineWidths[2] = 250; host.Library.Catalog.Settings.ManagerListWidths[2] = 350;
+            host.Library.Catalog.Settings.ManagerOutlineWidths[8] = 230; host.Library.Catalog.Settings.ManagerListWidths[8] = 320;
+            categories.SelectedIndex = 2; manager.Refresh();
+            Check(Math.Abs(outlineColumn.Width.Value - 250) < .1 && Math.Abs(listColumn.Width.Value - 350) < .1, "manager restores stack pane widths");
+            categories.SelectedIndex = 8; manager.Refresh();
+            Check(Math.Abs(outlineColumn.Width.Value - 230) < .1 && Math.Abs(listColumn.Width.Value - 320) < .1, "manager restores stored pane widths separately");
+            host.Library.Catalog.Settings.ManagerOutlineWidths[2] = 220; host.Library.Catalog.Settings.ManagerListWidths[2] = 340;
+            host.Library.Catalog.Settings.ManagerOutlineWidths[8] = 220; host.Library.Catalog.Settings.ManagerListWidths[8] = 340; manager.Refresh();
             host.Library.Move(note, NoteState.Stored); categories.SelectedIndex = 8; manager.Refresh(); notes.SelectedItem = note;
-            Layout(manager, 764, 380, "manager-minimum"); Check(preview.ActualWidth >= 200 && notes.ActualWidth >= 200, "manager minimum size keeps list and preview usable");
-            Layout(manager, 1034, 640, "manager-default"); Check(preview.ActualWidth > 300, "manager preview grows with window");
+            Layout(manager, 900, 520, "manager-minimum"); Check(notes.ActualWidth >= 200 && preview.ActualWidth >= 200, "manager minimum size keeps list and content usable");
+            Layout(manager, 1180, 720, "manager-default"); Check(notes.ActualWidth >= 200 && preview.ActualWidth > 300, "manager content grows with window");
             var reminder = new ScheduleWindow(host, note, true, true); var controls = Descendants((DependencyObject)reminder.Content).ToArray(); var combos = controls.OfType<System.Windows.Controls.ComboBox>().ToArray();
             combos[0].SelectedIndex = 1; var relativeMinutes = controls.OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c).StartsWith("分钟数")); var time = controls.OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c) == "时间"); Check(((FrameworkElement)time.Parent).Visibility == Visibility.Collapsed && ((FrameworkElement)relativeMinutes.Parent).Visibility == Visibility.Visible, "relative reminder uses independent minute input");
             combos[1].SelectedIndex = 5; Layout(reminder, 464, 370, "reminder-interval"); var visibleTextFields = controls.OfType<System.Windows.Controls.TextBox>().Where(c => ((FrameworkElement)c.Parent).Visibility == Visibility.Visible).ToArray(); Check(visibleTextFields.Contains(relativeMinutes), "minute field remains present for interval recurrence");
@@ -223,14 +287,19 @@ namespace DeskPins.Tests
             var clearSleep = new ScheduleWindow(host, scheduled, true, false); Descendants((DependencyObject)clearSleep.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "清除").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); Check(scheduled.State == NoteState.Desktop && scheduled.WakeUtc == null, "clearing sleep restores desktop state");
             var untouched = new ScheduleWindow(host, scheduled, true, false); Descendants((DependencyObject)untouched.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "取消").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); Check(scheduled.State == NoteState.Desktop && scheduled.WakeUtc == null, "cancel reminder leaves note unchanged");
             var transferFile = host.Library.Catalog.Settings.TransferFile; host.Library.Catalog.Settings.TransferFile = ""; var configuration = new SettingsWindow(host); host.Library.Catalog.Settings.TransferFile = transferFile;
+            Check(configuration.ShowInTaskbar, "settings window is independent and visible in the taskbar");
             var navigation = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.ListBox>().Single();
-            Check(navigation.Items.Count == 7, "settings uses a seven-category navigation rail");
+            Check(navigation.Items.Count == 9, "settings uses a nine-category navigation rail");
             for (int i = 0; i < navigation.Items.Count; i++) { navigation.SelectedIndex = i; Layout(configuration, 900, 640, "settings-" + i); }
             Check(Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "取消").IsCancel, "settings supports Escape cancel");
-            Layout(configuration, 800, 520, "settings-hotkeys-min");
-            navigation.SelectedIndex = 6;
+            Layout(configuration, 900, 640, "settings-data");
+            var dataButtons = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Button>().Select(c => c.Content.ToString()).ToArray();
+            Check(dataButtons.Contains("备份…") && dataButtons.Contains("恢复全部…") && dataButtons.Contains("导入便签…") && dataButtons.Contains("救回屏幕外便签"), "settings data page owns import and recovery actions");
+            navigation.SelectedIndex = 7;
             var hotkeyTabs = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TabControl>().Single();
             Check(hotkeyTabs.Items.Count == 2, "settings separates global and in-app shortcuts");
+            hotkeyTabs.SelectedIndex = 0; Layout(configuration, 900, 640, "settings-hotkeys-global");
+            Check(Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Primitives.ToggleButton>().Any(c => object.Equals(c.Tag, "global-manage")), "global manage shortcut can be configured");
             hotkeyTabs.SelectedIndex = 1; Layout(configuration, 900, 640, "settings-hotkeys-app");
             var draft = Field<Settings>(configuration, "settings");
             var newToggle = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Primitives.ToggleButton>().FirstOrDefault(c => object.Equals(c.Tag, "new"));
@@ -240,12 +309,17 @@ namespace DeskPins.Tests
             Check(draft.Shortcuts["new"] == "" && draft.DisabledShortcuts.ContainsKey("new"), "disabling in-app shortcut preserves its gesture");
             newToggle.IsChecked = true;
             Check(draft.Shortcuts["new"] == "Ctrl+N" && !draft.DisabledShortcuts.ContainsKey("new"), "enabling in-app shortcut restores its gesture");
+            using (var source = new System.Windows.Interop.HwndSource(new System.Windows.Interop.HwndSourceParameters("key-capture-test")))
+            {
+                newKey.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice, source, 0, System.Windows.Input.Key.Q) { RoutedEvent = System.Windows.Input.Keyboard.PreviewKeyDownEvent });
+            }
+            Check(newKey.Text == "Q" && draft.Shortcuts["new"] == "Q", "hotkey key input captures a new key");
             navigation.SelectedIndex = 0;
             var language = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.ComboBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c) == "界面语言");
             language.SelectedIndex = 1;
             Check(Ui.Text("保存") == "Save" && configuration.Title == "DeskPins Settings", "language dropdown previews English");
             Layout(configuration, 900, 640, "settings-en");
-            navigation = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.ListBox>().Single(); navigation.SelectedIndex = 6;
+            navigation = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.ListBox>().Single(); navigation.SelectedIndex = 7;
             hotkeyTabs = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TabControl>().Single();
             hotkeyTabs.SelectedIndex = 1; Layout(configuration, 900, 640, "settings-hotkeys-en");
             Check(((System.Windows.Controls.TabItem)hotkeyTabs.Items[0]).Header.ToString() == "Global shortcuts", "hotkey tabs follow the selected language");
@@ -257,10 +331,11 @@ namespace DeskPins.Tests
             Check(host.Library.Catalog.Settings.Language == "zh-CN", "settings save commits the selected language");
             foreach (var kind in new[] { "folders", "friends", "tags" }) { var collection = new CollectionsWindow(host, kind); Layout(collection, 444, 280, "collection-" + kind); Check(Descendants((DependencyObject)collection.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "关闭").IsCancel, "collection keyboard close " + kind); collection.Close(); }
             var attachment = new AttachWindow(host, note); Descendants((DependencyObject)attachment.Content).OfType<System.Windows.Controls.ListBox>().Single().ItemsSource = new[] { new WindowInfo { Title = "Sample document — Editor", Class = "SampleEditor" } }; Layout(attachment, 524, 360, "attachment"); Check(Descendants((DependencyObject)attachment.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "确定").IsDefault, "attachment supports Enter confirm");
-            for (int category = 0; category <= 10; category++) { categories.SelectedIndex = category; Layout(manager, 764, 380, "manager-category-" + category); Check(notes.ActualWidth >= 200 && preview.ActualWidth >= 200, "minimum manager panes in category " + category); }
+            for (int category = 0; category <= 10; category++) { categories.SelectedIndex = category; Layout(manager, 900, 520, "manager-category-" + category); Check(category == 0 ? homeView.ActualWidth >= 500 : notes.ActualWidth >= 200 && preview.ActualWidth >= 200, "minimum manager layout in category " + category); }
             var noteWindow = host.Windows.Values.First(w => w.TextEditor != null); noteWindow.TextEditor.InsertText("Sample note\n☐ Task one\n☑ Task two"); Layout(noteWindow, 260, 190, "note-text"); Check(noteWindow.TextEditor.ActualHeight > 100, "text note keeps editable body below title"); noteWindow.ToggleRoll(); Layout(noteWindow, 260, 24, "note-rolled"); noteWindow.ToggleRoll();
             var imageWindow = host.Windows.Values.First(w => w.ImageEditor != null); Layout(imageWindow, 260, 190, "note-image"); Check(imageWindow.ImageEditor.ActualWidth >= 250, "image note keeps canvas scrollable");
             var stack = new StackWindow(host, new NoteStack { Name = "Sample stack with a long title that must be trimmed", Width = 240, Height = 60 }); stack.Refresh(); Check(Math.Abs(stack.Width - 240) < .1 && Math.Abs(stack.Height - 60) < .1, "stack window restores its saved size"); Layout(stack, 240, 60, "stack"); stack.Close();
+            var topStack = new StackWindow(host, new NoteStack { Name = "Topmost stack", Topmost = true }); Check(topStack.Topmost, "stack window reads saved topmost state"); topStack.Close();
             var backupFile = Path.Combine(Path.GetDirectoryName(host.Library.Repository.FilePath), "layout-backup.db"); host.Library.Repository.Backup(backupFile); var backup = new BackupBrowserWindow(host, backupFile); Layout(backup, 444, 280, "backup"); Check(Descendants((DependencyObject)backup.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "取消").IsCancel, "backup browser supports Escape cancel"); backup.Close();
             reminder.Close(); configuration.Close(); attachment.Close();
         }

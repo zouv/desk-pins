@@ -22,6 +22,7 @@ namespace DeskPins.Core
         [DataMember] public DateTime ModifiedUtc = DateTime.UtcNow;
         [DataMember] public DateTime StateUtc = DateTime.UtcNow;
         [DataMember] public double Left = 140, Top = 140, Width = 260, Height = 190, ExpandedHeight = 190;
+        [DataMember] public double? ExpandedLeft, ExpandedTop, RolledLeft, RolledTop;
         [DataMember] public string Color = "#FFFFB4", Foreground = "#000000", FontName = "Verdana";
         [DataMember] public double FontSize = 13.333, Opacity = 1;
         [DataMember] public bool Topmost, Rolled, Locked, Ghost, Secret, Scrollbar, Stand, Encrypted;
@@ -38,6 +39,7 @@ namespace DeskPins.Core
         [IgnoreDataMember] public bool ContentDecrypted;
         public string DisplayTitle { get { return string.IsNullOrWhiteSpace(Title) ? (string.IsNullOrWhiteSpace(Preview) ? (Kind == NoteKind.Image ? "图片便签" : "新便签") : Preview) : Title; } }
         [IgnoreDataMember] public bool CompactPreview;
+        [IgnoreDataMember] public string ColorHex { get { return Color; } }
         public string DisplayPreview { get { return CompactPreview ? "" : Preview; } }
         [IgnoreDataMember] public bool DisplayModifiedDates;
         public string DateLabel { get { var date = DisplayModifiedDates ? ModifiedUtc : State == NoteState.Sleeping || State == NoteState.Recurring ? WakeUtc ?? StateUtc : State == NoteState.Stored || State == NoteState.Closed ? StateUtc : CreatedUtc; return date.ToLocalTime().ToString("yyyy-MM-dd HH:mm"); } }
@@ -95,20 +97,22 @@ namespace DeskPins.Core
     {
         [DataMember] public string Name = "默认", Color = "#FFFFB4", Foreground = "#000000", FontName = "Verdana";
         [DataMember] public double FontSize = 13.333, Opacity = 1;
+        [DataMember] public int TabWidth = 50;
         [DataMember] public bool Topmost;
         public void Apply(Note n) { n.Color = Color; n.Foreground = Foreground; n.FontName = FontName; n.FontSize = FontSize; n.Opacity = Opacity; n.Topmost = Topmost; }
     }
     [DataContract]
     public sealed class Settings
     {
+        [DataMember] public int Version = 2;
         [DataMember] public bool Snap = true, OpaqueEditing = true, DoubleClickRoll = true, PreventDuplicates = true;
         [DataMember] public bool AlarmFlash = true, AlarmJiggle, AlarmLoop, Networking, UseDns, EmailEnabled, AutoStart, CompactList;
         [DataMember] public int SnoozeMinutes = 5, NetworkPort = 52673, SmtpPort = 587, BackupHours = 24, ClosedRetentionDays = 0;
         [DataMember] public bool SmtpSsl = true;
         [DataMember] public string AlarmSound = "", WakeSound = "", SmtpHost = "", SmtpUser = "", SmtpSecret = "", SmtpFrom = "";
-        [DataMember] public string GlobalNewKey = "", GlobalToggleKey = "", TransferFile = "", SkinPath = "", FriendsServer = "", Language = "zh-CN";
+        [DataMember] public string GlobalNewKey = "", GlobalToggleKey = "", GlobalManageKey = "", TransferFile = "", SkinPath = "", FriendsServer = "", Language = "zh-CN";
         [DataMember] public string PasswordVerifier = "";
-        [DataMember] public int TomorrowHour;
+        [DataMember] public int TomorrowHour, TomorrowMinute;
         [DataMember] public DateTime LastBackupUtc = DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc);
         [DataMember] public NoteKind DefaultKind;
         [DataMember] public List<NoteStyle> Styles = new List<NoteStyle>();
@@ -117,6 +121,21 @@ namespace DeskPins.Core
         [DataMember] public bool ManagerModifiedDates;
         [DataMember] public bool EmailViaClient;
         [DataMember] public Dictionary<int, int> ManagerOrders = new Dictionary<int, int>();
+        [DataMember] public Dictionary<int, double> ManagerOutlineWidths = new Dictionary<int, double>();
+        [DataMember] public Dictionary<int, double> ManagerListWidths = new Dictionary<int, double>();
+        [DataMember] public bool ShowShadow = true;
+        [DataMember] public bool LinksClickable = true, CheckboxTrailingSpace = true, ShiftCtrlDirection = true;
+        [DataMember] public string ScreenGrabUi = "Hole in white overlay", ImageSaveType = "PNG";
+        [DataMember] public int ImageUndoLevels = 5;
+        [DataMember] public List<string> HighlightColors = new List<string>();
+        [DataMember] public bool WakeSoundEnabled, WakeAlarm;
+        [DataMember] public string WakeTopmostMode = "current";
+        [DataMember] public bool AlarmSoundEnabled = true;
+        [DataMember] public bool StartHidden, ConfirmClose;
+        [DataMember] public bool ClickMakesVisible = true;
+        [DataMember] public int SnapDistance = 10, SnapGap = 2;
+        [DataMember] public string DoubleClickAction = "none";
+        [DataMember] public bool RolledDifferentPosition, LockPreventsMove, RestoreOpacityAfterEditing, KeepOnScreen;
         public void Normalize()
         {
             if (LastBackupUtc == DateTime.MinValue) LastBackupUtc = DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc);
@@ -125,9 +144,37 @@ namespace DeskPins.Core
             if (Shortcuts == null) Shortcuts = new Dictionary<string, string>();
             if (DisabledShortcuts == null) DisabledShortcuts = new Dictionary<string, string>();
             if (ManagerOrders == null) ManagerOrders = new Dictionary<int, int>();
+            if (ManagerOutlineWidths == null) ManagerOutlineWidths = new Dictionary<int, double>();
+            if (ManagerListWidths == null) ManagerListWidths = new Dictionary<int, double>();
             if (string.IsNullOrWhiteSpace(Language)) Language = "zh-CN";
+            if (HighlightColors == null) HighlightColors = new List<string>();
+            while (HighlightColors.Count < 7) HighlightColors.Add(new[] { "#FFFF00", "#FF00FF", "#FFC000", "#00FF00", "#00FFFF", "#FF6600", "#CC99FF" }[HighlightColors.Count]);
+            if (HighlightColors.Count > 7) HighlightColors.RemoveRange(7, HighlightColors.Count - 7);
+            if (string.IsNullOrWhiteSpace(ScreenGrabUi)) ScreenGrabUi = "Hole in white overlay";
+            if (string.IsNullOrWhiteSpace(ImageSaveType)) ImageSaveType = "PNG";
+            if (string.IsNullOrWhiteSpace(WakeTopmostMode)) WakeTopmostMode = "current";
+            if (string.IsNullOrWhiteSpace(DoubleClickAction)) DoubleClickAction = DoubleClickRoll ? "roll" : "none";
+            if (string.IsNullOrWhiteSpace(GlobalNewKey)) GlobalNewKey = "";
+            if (string.IsNullOrWhiteSpace(GlobalToggleKey)) GlobalToggleKey = "";
+            if (string.IsNullOrWhiteSpace(GlobalManageKey)) GlobalManageKey = "";
+            if (ImageUndoLevels < 1) ImageUndoLevels = 5;
+            if (SnapDistance < 0) SnapDistance = 10;
+            if (SnapGap < 0) SnapGap = 2;
+            TomorrowMinute = Math.Max(0, Math.Min(59, TomorrowMinute));
             NetworkPort = Math.Max(1, Math.Min(65535, NetworkPort)); SnoozeMinutes = Math.Max(1, SnoozeMinutes);
             TomorrowHour = Math.Max(0, Math.Min(23, TomorrowHour));
+            if (Version < 2)
+            {
+                // Upgrade old catalogs without turning every new option into false/zero.
+                ShowShadow = true; LinksClickable = true; CheckboxTrailingSpace = true; ShiftCtrlDirection = true;
+                ClickMakesVisible = true; SnapDistance = 10; SnapGap = 2; ImageUndoLevels = 5; AlarmSoundEnabled = true;
+                if (string.IsNullOrWhiteSpace(ScreenGrabUi)) ScreenGrabUi = "Hole in white overlay";
+                if (string.IsNullOrWhiteSpace(ImageSaveType)) ImageSaveType = "PNG";
+                if (string.IsNullOrWhiteSpace(WakeTopmostMode)) WakeTopmostMode = "current";
+                DoubleClickAction = DoubleClickRoll ? "roll" : "none";
+                Version = 2;
+            }
+            foreach (var style in Styles) if (style.TabWidth <= 0) style.TabWidth = 50;
         }
     }
     [DataContract]

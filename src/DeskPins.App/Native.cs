@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
 using DeskPins.Core;
 
@@ -31,10 +32,22 @@ namespace DeskPins.App
             IntPtr h = new WindowInteropHelper(window).Handle; if (h == IntPtr.Zero) return; long style = GetWindowLongPtr(h, -20).ToInt64(); style = ghost ? style | 0x20L | 0x80000L : style & ~0x20L; if (!ghost && !window.AllowsTransparency && window.Opacity >= 1) style &= ~0x80000L; SetWindowLongPtr(h, -20, new IntPtr(style)); if (ghost) SetLayeredWindowAttributes(h, 0, (byte)(Math.Max(0, Math.Min(1, window.Opacity)) * 255), 2);
         }
         public static void ToolWindow(Window window) { var h = new WindowInteropHelper(window).Handle; long s = GetWindowLongPtr(h, -20).ToInt64(); SetWindowLongPtr(h, -20, new IntPtr((s | 0x80L) & ~0x40000L)); }
+        public static void RaiseNoActivate(Window window)
+        {
+            var h = new WindowInteropHelper(window).Handle;
+            if (h != IntPtr.Zero) SetWindowPos(h, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040);
+        }
         public static bool RegisterHotkey(IntPtr h, int id, string gesture)
         {
             if (string.IsNullOrWhiteSpace(gesture)) return true;
-            try { var g = (System.Windows.Input.KeyGesture)new System.Windows.Input.KeyGestureConverter().ConvertFromString(gesture); uint mods = (uint)g.Modifiers; uint native = 0x4000; if ((mods & 1) != 0) native |= 1; if ((mods & 2) != 0) native |= 2; if ((mods & 4) != 0) native |= 4; if ((mods & 8) != 0) native |= 8; return RegisterHotKey(h, id, native, (uint)System.Windows.Input.KeyInterop.VirtualKeyFromKey(g.Key)); } catch { return false; }
+            Key key; ModifierKeys modifiers;
+            if (!Ui.TryParseGesture(gesture, out key, out modifiers)) return false;
+            uint native = 0x4000;
+            if ((modifiers & ModifierKeys.Alt) != 0) native |= 1;
+            if ((modifiers & ModifierKeys.Control) != 0) native |= 2;
+            if ((modifiers & ModifierKeys.Shift) != 0) native |= 4;
+            if ((modifiers & ModifierKeys.Windows) != 0) native |= 8;
+            return RegisterHotKey(h, id, native, (uint)KeyInterop.VirtualKeyFromKey(key));
         }
         public static Rect Clamp(Rect bounds)
         {
@@ -51,6 +64,7 @@ namespace DeskPins.App
         [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
         [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr(IntPtr h, int index, IntPtr value);
+        [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
         [DllImport("user32.dll")] private static extern bool RegisterHotKey(IntPtr h, int id, uint mods, uint key);
         [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr h, int id);
         [DllImport("user32.dll")] public static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr module, WinEventProc proc, uint pid, uint thread, uint flags);

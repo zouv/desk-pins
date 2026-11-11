@@ -22,7 +22,7 @@ WPF 便签 / 管理 / 设置
 | 管理、收藏、标签和堆叠 | ManagerWindow.cs、CollectionsWindow.cs、NoteLibrary.cs | 通信协议 |
 | 提醒、重复与窗口附着 | ScheduleWindow.cs、RepeatSchedule.cs、AppHost.Schedule / UpdateAttachments | 图片算法 |
 | 导入导出、备份与迁移 | Transfer.cs、AtomicFile.cs、StickiesImporter.cs、BackupBrowserWindow.cs、AppHost.Import / Restore | 编辑算法 |
-| 托盘、启动、设置与通信 | Program.cs、AppHost.cs、SettingsWindow.cs、Localization.cs、ApiService.cs | 图片算法 |
+| 托盘、启动、设置与通信 | Program.cs、AppHost.cs、SettingsWindow.cs、Localization.cs、DataLocation.cs、ApiService.cs | 图片算法 |
 | 构建、验证和打包 | manager.sh、scripts/、tests/DeskPins.Tests/Program.cs | 功能参考 |
 | 完成度与接力 | HANDOFF.md、ROADMAP.md、docs/03-功能对照.md | 原版二进制 |
 
@@ -44,6 +44,7 @@ WPF 便签 / 管理 / 设置
 | src/DeskPins.Core/ | 元数据模型、状态、SQLite、加密、重复规则、传输与原版导入 |
 | src/DeskPins.App/ | 程序入口、WPF 编辑器 / 管理 / 设置、原生窗口、托盘与 IPC |
 | src/DeskPins.App/Localization.cs | 内置中英文资源；自定义 JSON 语言文件继续由 Ui.LoadLanguage 读取 |
+| src/DeskPins.App/DataLocation.cs | 默认 / 自定义数据目录解析与 `%LOCALAPPDATA%/DeskPins/data-directory.txt` 指针文件 |
 | src/DeskPins.App/WindowResize.cs | 无边框便签 / 堆叠窗口的边缘拖拽缩放与最小尺寸计算 |
 | tests/DeskPins.Tests/ | 无第三方框架的 STA 回归；自建临时数据，结束后清理 |
 | scripts/、manager.sh、*.bat | 构建、运行、打包、性能测量的统一入口 |
@@ -59,10 +60,13 @@ WPF 便签 / 管理 / 设置
 | 编辑 / 格式 / 窗口 | NoteWindow.Run / HandleKeyDown / Flush、TextEditor.Format / Read / Write |
 | 图片算法 | ImageEditor.BeginStroke / ContinueStroke / CommitStroke / CancelEdit / Transform / Crop / ResizeImage、RasterCanvas |
 | 状态转换 / 加密 | NoteLibrary.Move / Sleep / Load / Save / SetFolderEncrypted |
-| 管理与预览 | ManagerWindow.Refresh / BuildTree / DisplaySelected / FlushPending / DropTo |
-| 布局与设置校验 | SettingsWindow.BuildWindow / BuildShortcutsPage / ShortcutRow / Save、Ui.FitDialog / Field、AppHost.ValidateSettings / ShortcutFor |
-| 语言资源 | Ui.LoadLanguage / Text、Localization.Dictionary |
+| 管理与预览 | ManagerWindow 构造 / BuildTree / Refresh / TogglePreview / DisplaySelected / DropTo |
+| 设置布局与校验 | SettingsWindow.BuildCategoryPage / BuildAppearancePage / BuildContentPage / BuildAlertsPage / BuildDesktopPage / BuildDataPage / Save、Ui.FitDialog / Field、AppHost.ValidateSettings / ShortcutFor |
+| 语言资源 | Ui.LoadLanguage / Text、Localization.Dictionary、AppHost.ApplySettings / RefreshLanguageSurfaces |
+| 快捷键解析 | Ui.TryParseGesture / FormatGesture、Native.RegisterHotkey、AppHost.ActionFor |
+| 数据目录 | Program.Main、DataLocation.Resolve / SetCustom、AppHost.ApplyDataDirectory |
 | 窗口边缘缩放 | WindowResize.Attach / Calculate、NoteWindow 构造、StackWindow 构造 |
+| 拖拽吸附 / 堆叠前置 | AppHost.SnapAfterDrag / BringStacksForward、Native.RaiseNoActivate、StackWindow.BringForward |
 | 定时 / 休眠恢复 | NoteLibrary.Tick / NextDue、RepeatSchedule.Next、AppHost.Schedule / Tick |
 | 附着显隐 | AppHost.UpdateAttachments / EnsureAttachmentHook、AttachWindow |
 | 备份 / 合并 / 选择恢复 | NoteRepository.Backup / ImportBackup、BackupBrowserWindow |
@@ -78,12 +82,21 @@ WPF 便签 / 管理 / 设置
 - 计时器按最近到期时间唤醒，不做秒级常驻轮询；系统恢复事件重新计算错过的提醒。附着使用 WinEvent hook 与 180 ms 合并。
 - 管理器只在目录标识 / 名称变化时重建导航并恢复有效筛选；DropTo 先保存编辑再事务移动，子文件夹 Drop 在验证前标记 Handled，避免冒泡再次移动。
 - 图片鼠标事件调用 BeginStroke / ContinueStroke / CommitStroke；提交才建立撤销并通知保存，CancelEdit 恢复笔画前图像。选区操作只更新显示，Escape 由 NoteWindow 转发。
-- 设置窗口编辑 Settings 副本：语言下拉立即切换 Ui 资源并重建窗口，保存时 ValidateSettings → Atomic 写 Catalog → ApplySettings（重注册全局热键、加载语言、按需重建托盘）；取消关闭时恢复原语言。全局与应用内快捷键均以空手势表示停用，DisabledShortcuts 只保存恢复用的上次手势。
+- 设置窗口是非模态任务栏窗口：AppHost.Settings 复用单实例并用 Show() 打开，SettingsWindow.ShowInTaskbar=true，不能 ShowDialog 或设置 Owner，否则会阻塞便签编辑。语言下拉即时预览并重建设置页；保存时 ValidateSettings → Atomic 写 Catalog → ApplySettings。ApplySettings 用 appliedLanguage 判断真实语言变化：重载 Ui、重建托盘、关闭重开管理器与堆叠；便签窗口保留，只刷新静态提示，右键菜单按需生成新语言。取消关闭时恢复原语言。全局与应用内快捷键均以空手势表示停用，DisabledShortcuts 只保存恢复用的上次手势。
 - 无边框窗口缩放由 WindowResize 监听 Window 的 Preview 鼠标事件，在四边 6px 内手动改 Left / Top / Width / Height；NoteWindow 完成时写回 Note，StackWindow 写回 NoteStack.Width / Height。缩放期间 NoteWindow 抑制多选拖动与组移动，最小尺寸由调用方传入。
+- 便签标题拖动期间 MoveSelected 只同步组内窗口；DragMove 返回后才由 SnapAfterDrag 按屏幕 / 其他便签边缘吸附，避免连续吸附把小幅拖动拉回原位。SnapAfterDrag 移动全部选中窗口；按住 Alt 反向切换吸附。
+- 堆叠窗口读取 NoteStack.Topmost，AppHost.NewStack 沿用来源便签的 Topmost；窗口设置 ShowActivated=false。选中或激活便签时 AppHost.BringStacksForward 用 SetWindowPos(NOACTIVATE) 把全部堆叠抬到最前，确保未置顶堆叠被其他窗口遮盖后仍可见。
+- TextEditor 在 FlowDocument.Resources 注入 Paragraph Margin=0 隐式样式，并在 Read / TextChanged 归一化段落边距，避免 Paragraph 自动边距形成多余空行。
+- NoteWindow 的 OpaqueEditing 只对活动便签强制不透明；用户从右键改透明度或应用样式时 showOpacity 临时绕过，失焦后清除，保证改动立即可见。
+- 管理便签为左侧图标栏 + 动态工作区：Stored / Stacks / Tags 显示大纲 + 卡片列表 + 内容三栏，其余分类显示卡片列表 + 内容两栏，Home 为仪表盘。大纲只在三个集合分类显示；两条 GridSplitter 的宽度按分类持久化；树 / 列表计数写入快照，避免预览保存时反复清空选择。
+- 设置导航共 9 类：应用、桌面、外观、内容、提醒、网络、邮件、快捷键、数据。数据页承载托盘移出的导入 / 备份 / 恢复 / 救回操作；数据目录用 SQLite Backup 复制到空目标，目标已有数据库则直接切换，写 `data-directory.txt` 后重启生效。Program、单实例和 API 都通过 DataLocation.Resolve。
+- 快捷键统一走 Ui.TryParseGesture / FormatGesture：支持无修饰普通键与 F1–F24；全局快捷键保存时必须带修饰键或功能键。全局新建 / 显隐 / 管理分别注册 HotKey ID 1 / 2 / 3。
+- 设置表单：Appearance 使用样式下拉 + 颜色 / 字体 / 透明度 / Tab 宽度 / 示例 / 阴影 / 皮肤；Content 管理链接、复选框、Shift+Ctrl 方向、7 个高亮色和图片行为；Alerts 管理唤醒默认值、声音文件与响铃；Desktop 管理启动隐藏、关闭确认、吸附距离 / 间隙和双击标题栏行为。
 
 ## 4. 接口契约
 
 - Note：序列化元数据与非序列化 Body / PlainText 分离；Id 是字符串，创建新身份用 Clone。State 只有 Desktop / Closed / Stored / Sleeping / Recurring，附着与堆叠为独立字段。
+- Note 的卷起独立位置使用 ExpandedLeft / ExpandedTop / RolledLeft / RolledTop 可空字段；只有 Settings.RolledDifferentPosition 打开时才读写。
 - NoteStack：Left / Top / Width / Height 均持久化；旧数据缺尺寸时 Catalog.Normalize 补 180×44，最小 100×32。
 - Body：文本为 RTF，图片为 PNG。Body=null 表示内容未加载，元数据更新不能改写内容。元数据读取失败不重置数据库。
 - 网络：CArchive 长度帧 + UTF-8 `#sticky` 属性；最大 16 MiB。包含内容、颜色、位置、回复端口；原版 Unicode 与 FORM 等高级字段仍待核验。
@@ -91,7 +104,10 @@ WPF 便签 / 管理 / 设置
 - DeskPins 文件：`.dpn` 包含元数据、内容和版本；`.dpx` 是带接收身份的包列表；原版 `.sti` / transfer.ini 的完整兼容未验证。
 - TextEditor.PlainText / SelectedPlainText 从当前文档读取；在保存合并延迟内，复制、自动宽度和替换判定不能依赖 Note.PlainText 缓存。ShortcutFor 同时供菜单和键盘分发读取。
 - Settings.Language：`zh-CN` / `en-US` 使用内置资源，其他值视为自定义 JSON 字典路径；Ui.LoadLanguage 负责切换，Ui.Text 只把中文源串映射为英文。
-- Settings.Shortcuts：空字符串表示停用该应用内快捷键；DisabledShortcuts 保存停用前的手势，仅用于设置界面恢复显示，不参与键盘分发。GlobalNewKey / GlobalToggleKey 为空同样表示关闭。
+- Settings.Version：Catalog 升级时 Normalize 从旧版本补齐新增选项（链接、阴影、高亮色、吸附距离、图片类型等）；不要只看字段默认值，旧 JSON 缺字段会得到 false/0。
+- Settings.Shortcuts：空字符串表示停用该应用内快捷键；DisabledShortcuts 保存停用前的手势，仅用于设置界面恢复显示，不参与键盘分发。GlobalNewKey / GlobalToggleKey / GlobalManageKey 为空同样表示关闭。
+- 数据目录不在 Catalog 内：DataLocation 的指针文件决定下次启动目录；`--data-dir` 命令行优先，显式参数会覆盖指针。
+- ManagerOutlineWidths / ManagerListWidths：按分类索引保存管理器的三栏 / 两栏宽度；Home 不显示列表，Stored / Stacks / Tags 保存大纲和列表宽度，其他分类保存列表宽度。
 
 ## 7. 设计约束
 
@@ -104,4 +120,14 @@ WPF 便签 / 管理 / 设置
 - 离屏布局用显式 Measure / Arrange 和 RenderTargetBitmap.Render(root)；VisualBrush 的自动布局可能重新测量根节点，不能用缩放后的图像验证实际控件尺寸。测试图只用示例内容，清除路径字段后生成。
 - 便签 / 堆叠使用 WindowStyle=None + ResizeMode.NoResize，没有原生非客户区缩放；不要再通过 WM_NCLBUTTONDOWN 模拟，改用 WindowResize 的应用内命中与拖拽。
 - 语言切换是设置草稿的即时预览：取消 / 关闭窗口必须恢复原语言，只有保存成功后才写入 Catalog。英文翻译以中文源串为 key，新增 UI 文案先走 Ui.Text，再补 Localization 条目。
+- 语言是否真正变化必须比较 AppHost.appliedLanguage，不能用 Ui.CurrentLanguage（设置预览会提前改它）；保存后刷新托盘、管理器和堆叠，但不要重建便签窗口。
+- 设置窗口必须是非模态任务栏窗口（ShowInTaskbar=true + Show）；ShowDialog / Owner 会让便签无法编辑和选中。
+- 自动吸附只在 DragMove 返回后执行；不要在 MouseMove 中实时吸附加回窗口，否则小幅拖动会看起来“拖不动”。
+- Paragraph 的 Margin 可能是 Auto 或由 RTF 显式带入；TextEditor 必须用隐式样式和归一化保持 0，否则会出现多余空行。
+- 堆叠窗口 ShowActivated=false，前置用 SetWindowPos(NOACTIVATE)，不能抢走便签焦点；NoteWindow 的 OpaqueEditing 对活动窗口强制不透明，用户显式改透明度时用 showOpacity 临时绕过。
+- 数据目录是启动级配置：不要尝试在运行中替换 NoteLibrary 的 Repository；修改时先保存设置，再备份数据库到目标，写指针文件并提示重启。目标已有数据库时只能切换，不能覆盖。
+- 托盘不再承载导入 / 备份 / 恢复 / 救回；这些操作只在设置-数据页，避免两套入口行为漂移。
+- 管理便签的内容区是独立第三栏（Home 除外），不要恢复旧的“列表占满 + 隐藏预览”结构；BuildTree 必须把计数纳入快照，否则预览保存会清空选择。
+- 管理便签的工作区是分类相关布局：不要在所有分类常驻 Stored folders / Stacks / Tags 大纲；只有 2 / 8 / 9 显示大纲，Home 显示仪表盘，其余显示列表 + 内容。分隔条宽度必须按分类读 ManagerOutlineWidths / ManagerListWidths，保存时不要覆盖其他分类。
+- 快捷键格式不要只用 KeyGestureConverter：它拒绝无修饰的普通字符键。统一使用 Ui.TryParseGesture / FormatGesture；全局快捷键必须带修饰键或功能键。
 - 快捷键启停以空手势表达，不要用“删除自定义项”表示停用，否则会退回默认手势并重新生效。
