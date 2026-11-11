@@ -4,6 +4,18 @@
 
 ## [未发布]
 
+### 新增
+
+- 托盘“关于 DeskPins”改为独立关于窗口，显示产品名、版本、作者和功能简介；支持 Esc 关闭。
+
+### 变更
+
+- 文档体系同步 vibe-coding-starter 最新机械修复：`check-docs.sh` 接受 `**/node_modules/`、`**/.venv/` 写法，`manager.sh check-docs` 透传 `--strict` 等参数。
+- 文档体系版本标记更新到 vibe-coding-starter 2026-11-11.1；模板新增的桌面出包规范（`dist/dev` + `dist/release`）与本项目现有布局一致。
+- Windows 双击脚本改为纯 PowerShell 入口：构建、开发、运行、测试、打包直接调用 `scripts/*.ps1`，不再依赖 Git Bash；`verify.bat` 的文档检查仍使用 Git for Windows 的 bash。失败时窗口保留，设置 `DESKPINS_NO_PAUSE=1` 可跳过暂停。
+- `dev.bat` 构建前强制关闭正在运行的 DeskPins，避免开发版文件被占用；`package.bat` 检测到运行实例时先询问是否关闭，取消则退出。强制关闭可能丢失最后约 600 ms 内未保存的编辑。
+- `package.bat` / `manager.sh package` 改为 `dist/dev` + `dist/release` 出包布局：Debug 调试包（含 PDB、构建日志、build-info）、可运行 `unpack/`、免安装 zip、`SHA256SUMS.txt` 与 `unpack-manifest.json`；发布前校验 zip，失败时保留旧包并回滚。
+
 ## [0.2.0] - 2026-11-11
 
 管理便签集合管理、月历与底部查找栏，Closed 显示短 Id；设置 9 类、数据页与自定义数据目录继续完善。真实桌面交互与视觉验收仍在进行。

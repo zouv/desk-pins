@@ -1,14 +1,14 @@
 $ErrorActionPreference='Stop'
 $projectRoot=Split-Path -Parent $PSScriptRoot
 [xml]$props=Get-Content -LiteralPath (Join-Path $projectRoot 'Directory.Build.props') -Raw
-$name='DeskPins-'+$props.Project.PropertyGroup.Version+'-x64'
-$zip=Join-Path $projectRoot ('dist/'+$name+'.zip')
+$name='DeskPins_'+$props.Project.PropertyGroup.Version+'_x64-unpack'
+$zip=Join-Path $projectRoot ('dist/release/'+$name+'.zip')
 if(-not(Test-Path -LiteralPath $zip)){throw 'Run package first.'}
 $testRoot=Join-Path $projectRoot ('.runtime/package-smoke/'+[Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::ExtractToDirectory($zip,$testRoot)
-$exe=Join-Path $testRoot ($name+'/DeskPins.exe')
+$exe=Join-Path $testRoot 'DeskPins.exe'
 $data=Join-Path $testRoot 'data'
 $response=Join-Path $testRoot 'response.txt'
 $process=Start-Process -FilePath $exe -ArgumentList ('--data-dir "'+$data+'"') -WindowStyle Hidden -PassThru

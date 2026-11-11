@@ -87,7 +87,7 @@
 - 保存、还原与迁移必须事务化；数据库读取失败不能覆盖原文件。
 - 网络监听、开机启动与邮件发送由用户显式配置；开发验证不得向真实联系人发送。
 - 原版源码与资源不复制进产品，独立实现行为，使用自制资源。
-- 不自动提交、推送、关闭用户已有应用。
+- 不自动提交、推送、关闭用户已有应用。例外：`dev.bat` 按约定强制关闭运行中的 DeskPins，`package.bat` 先询问；代理自己不得擅自结束用户进程。
 
 ### 3.1 个人信息与仓库卫生（铁律）
 
@@ -107,7 +107,8 @@
 ## 4. 验证（改完怎么确认没坏）
 
 协作文档已经初始化，以 `manager.sh` 为命令唯一来源；同步 README 命令表。
-`sh manager.sh verify` 执行 Release 构建、独立临时数据回归与文档检查；`package` 生成免安装包。
+Windows 双击脚本直接调用同一组 `scripts/*.ps1`（build / dev / run / test / package），构建 / 运行 / 测试 / 打包不依赖 Git Bash；`verify.bat` 仍需 bash 跑文档检查。`dev.bat` 构建前强制关闭运行中的 DeskPins；`package.bat` 检测到运行实例时先询问。新增或修改命令时同步 `manager.sh`、对应 `.bat` 与 README。
+`sh manager.sh verify` 执行 Release 构建、独立临时数据回归与文档检查；`package` 生成 `dist/dev` 调试包与 `dist/release` 免安装包（含 SHA256）。
 每次修改执行对应构建与测试，UI 实测与离屏验证分别记录。
 任何没有实测的兼容性、网络互通、系统重启和性能，不宣称已验收。
 文档修改后运行 `sh check-docs.sh`；机械检查不能替代源码核对。
@@ -175,4 +176,4 @@
 
 > 自检：「新对话只读文档能否接力？」+「文档与代码是否一致？」两条都 yes 才算收工；收工前跑一次 `sh check-docs.sh`。
 
-<!-- vibe-coding-starter 2026-11-10.1 · 文档体系版本标记：初始化时保留，用来判断本项目的规则是否需要随模板升级（变更记录见模板仓库 vibe-coding-starter/README.md） -->
+<!-- vibe-coding-starter 2026-11-11.1 · 文档体系版本标记：初始化时保留，用来判断本项目的规则是否需要随模板升级（变更记录见模板仓库 vibe-coding-starter/README.md） -->

@@ -177,11 +177,11 @@ if [ -f .gitignore ]; then
   grep -qE '^\.runtime/?$' .gitignore \
     || wrn ".gitignore 没有忽略 .runtime/（PID / 日志 / 临时文件）"
   if [ -f package.json ] || [ -f web/package.json ]; then
-    grep -qE '^node_modules/?$' .gitignore \
+    grep -qE '^(\*\*/)?node_modules/?$' .gitignore \
       || wrn ".gitignore 没有忽略 node_modules/"
   fi
   if [ -f pyproject.toml ]; then
-    grep -qE '^\.venv/?$' .gitignore \
+    grep -qE '^(\*\*/)?\.venv/?$' .gitignore \
       || wrn ".gitignore 没有忽略 .venv/"
   fi
 fi

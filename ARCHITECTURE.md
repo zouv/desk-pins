@@ -1,5 +1,8 @@
 # 代码链路图谱 · DeskPins
 
+> 目的：给 AI 与维护者一份「读这一份就能定位代码」的导航地图，避免每次改动或排查都全量扫描。
+> 维护：代码结构变化后同步更新（AGENTS §1）；长期有效的坑与设计理由记入 §7；按函数名 / 锚点 grep，不依赖行号。
+
 ## 0. 架构
 
 纯 WPF 多窗口应用，AppHost 管理窗口与系统服务，NoteLibrary 管理便签状态，NoteRepository 通过系统 winsqlite3.dll 保存内容。历史便签只加载元数据；界面与内容按需创建，启动按帧逐张恢复桌面窗口。
@@ -18,12 +21,13 @@ WPF 便签 / 管理 / 设置
 | 任务 | 首读 | 可忽略 |
 |---|---|---|
 | 便签编辑和窗口行为 | NoteWindow.cs、TextEditor.cs、ImageEditor.cs、Native.cs、WindowResize.cs | 通信与迁移 |
+| 屏幕截取 / 从屏幕新建图片便签 | CaptureWindow.cs、AppHost.Capture | 通信与迁移 |
 | 状态、保存、加密和事务 | NoteLibrary.cs、NoteRepository.cs、Models.cs、Crypto.cs | 皮肤和通信 |
 | 管理、收藏、标签和堆叠 | ManagerWindow.cs、ManagerWindow.Collections.cs、ManagerWindow.Calendar.cs、ManagerWindow.Search.cs、CollectionEditor.cs、NoteLibrary.cs | 通信协议 |
 | 提醒、重复与窗口附着 | ScheduleWindow.cs、RepeatSchedule.cs、AppHost.Schedule / UpdateAttachments | 图片算法 |
 | 导入导出、备份与迁移 | Transfer.cs、AtomicFile.cs、StickiesImporter.cs、BackupBrowserWindow.cs、AppHost.Import / Restore | 编辑算法 |
 | 托盘、启动、设置与通信 | Program.cs、AppHost.cs、SettingsWindow.cs、Localization.cs、DataLocation.cs、ApiService.cs | 图片算法 |
-| 构建、验证和打包 | manager.sh、scripts/、tests/DeskPins.Tests/Program.cs | 功能参考 |
+| 构建、验证和打包 | manager.sh、scripts/、tests/DeskPins.Tests/Program.cs（§6） | 功能参考 |
 | 完成度与接力 | HANDOFF.md、ROADMAP.md、docs/03-功能对照.md | 原版二进制 |
 
 ## 1. 文件职责
@@ -42,18 +46,22 @@ WPF 便签 / 管理 / 设置
 | .vibe-template | 模板类型和版本来源 |
 | .runtime/ | 忽略入库的参考、测试与构建产物 |
 | src/DeskPins.Core/ | 元数据模型、状态、SQLite、加密、重复规则、传输与原版导入 |
+| src/DeskPins.Core/Sqlite.cs | 系统 winsqlite3.dll 的最小 P/Invoke 封装，供 NoteRepository 使用 |
 | src/DeskPins.App/ | 程序入口、WPF 编辑器 / 管理 / 设置、原生窗口、托盘与 IPC |
 | src/DeskPins.App/ManagerWindow.cs | 管理便签主布局、分类导轨、列表 / 预览、Home 仪表盘、卡片模板 |
 | src/DeskPins.App/ManagerWindow.Collections.cs | Stored / Stacks / Tags 大纲、集合新建 / 删除 / 改名 / 属性、树内拖拽排序与文件夹改父目录 |
 | src/DeskPins.App/ManagerWindow.Calendar.cs | 自绘月历、日期选择、按日统计与日历筛选 |
 | src/DeskPins.App/ManagerWindow.Search.cs | 底部查找栏、搜索范围 / 内容 / Pin、标签过滤与搜索结果筛选 |
 | src/DeskPins.App/CollectionEditor.cs | 文件夹 / 堆叠 / 标签属性对话框、搜索标签过滤对话框 |
+| src/DeskPins.App/CaptureWindow.cs | 全屏截取与框选，返回 BitmapSource 供 AppHost.Capture 创建图片便签 |
+| src/DeskPins.App/AboutWindow.cs | 关于窗口：产品名、版本 / 作者、功能简介与关闭按钮 |
 | src/DeskPins.App/CollectionsWindow.cs | 联系人 / 收藏文件夹 / 标签的独立批量管理对话框 |
+| src/DeskPins.App/Ui.cs | 公共 UI 辅助：语言加载 / 文本映射、对话框、颜色与快捷键解析 |
 | src/DeskPins.App/Localization.cs | 内置中英文资源；自定义 JSON 语言文件继续由 Ui.LoadLanguage 读取 |
 | src/DeskPins.App/DataLocation.cs | 默认 / 自定义数据目录解析与 `%LOCALAPPDATA%/DeskPins/data-directory.txt` 指针文件 |
 | src/DeskPins.App/WindowResize.cs | 无边框便签 / 堆叠窗口的边缘拖拽缩放与最小尺寸计算 |
 | tests/DeskPins.Tests/ | 无第三方框架的 STA 回归；自建临时数据，结束后清理 |
-| scripts/、manager.sh、*.bat | 构建、运行、打包、性能测量的统一入口 |
+| scripts/、manager.sh、*.bat | 构建、运行、打包、性能测量与关闭运行实例的统一入口 |
 | assets/ | 自制图标和 JSON 皮肤示例 |
 | Directory.Build.props、DeskPins.sln | 统一 net48、x64、版本和构建配置 |
 
@@ -65,8 +73,10 @@ WPF 便签 / 管理 / 设置
 | 新建 / 显隐 / 托盘 | AppHost.Start / New / Sync / BuildTray / SetHidden |
 | 编辑 / 格式 / 窗口 | NoteWindow.Run / HandleKeyDown / Flush、TextEditor.Format / Read / Write |
 | 图片算法 | ImageEditor.BeginStroke / ContinueStroke / CommitStroke / CancelEdit / Transform / Crop / ResizeImage、RasterCanvas |
+| 屏幕截取 | AppHost.Capture、CaptureWindow 构造 / Result |
+| 关于窗口 | AboutWindow 构造 / VersionText、AppHost.BuildTray 的“关于 DeskPins”菜单项 |
 | 状态转换 / 加密 | NoteLibrary.Move / Sleep / Load / Save / SetFolderEncrypted |
-| 管理与预览 | ManagerWindow 构造 / BuildTree / Refresh / TogglePreview / DisplaySelected / DropTo |
+| 管理与预览 | ManagerWindow 构造 / BuildTree / Refresh / DisplaySelected / DropTo / ApplyLayout / SavePaneWidths |
 | 管理器集合管理 | ManagerWindow.CreateCollectionItem / EditCollection / DeleteCollection / MoveCollectionItem / NewNoteIn / TreeMouseMove / NodeDrop |
 | 管理器日历 | ManagerWindow.BuildCalendarView / CalendarDay / MatchesDate |
 | 管理器搜索 | ManagerWindow.BuildFindBar / SearchResults / OpenSearchTagFilter、SearchTagWindow |
@@ -124,7 +134,31 @@ WPF 便签 / 管理 / 设置
 - 数据目录不在 Catalog 内：DataLocation 的指针文件决定下次启动目录；`--data-dir` 命令行优先，显式参数会覆盖指针。
 - ManagerOutlineWidths / ManagerListWidths：按分类索引保存管理器的三栏 / 两栏宽度；Home 不显示列表，Stored / Stacks / Tags 保存大纲和列表宽度，其他分类保存列表宽度。
 
-## 7. 设计约束
+## 5. 样式 / 资源分段地图（可选）
+
+| 区段 | 锚点 / 路径 | 内容 |
+|---|---|---|
+| 程序图标 | `assets/icons/DeskPins.ico`、`DeskPins.App.csproj` 的 `ApplicationIcon` | 程序与窗口图标 |
+| JSON 皮肤 | `assets/skins/*.json`、`AppHost.Skin` / `ValidateSkin` | 标题栏颜色、按钮动作；示例见 `classic-plus.json` |
+| 颜色 / 阴影 | `Ui.Brush` / `Ui.NoteShadow` | 便签与管理器共用的画刷、阴影生成 |
+| 语言资源 | `Localization.cs`、`Ui.Text` | 内置中英文映射；自定义 JSON 由 `Ui.LoadLanguage` 读取 |
+
+---
+
+## 6. 运维 / 脚本（不碰业务即可独立维护）
+
+> 做构建 / 打包 / 文档检查任务只读本节、`manager.sh`、`scripts/` 与 `*.bat`，不用打开业务代码；具体操作见 docs/02。
+
+- **命令唯一来源**：`manager.sh` 分发到 `scripts/*.ps1`；`check-docs` 直接调用 `check-docs.sh` 并透传参数（如 `--strict`）。
+- **双击脚本**：`build.bat` / `dev.bat` / `run.bat` / `test.bat` / `package.bat` 直接调用对应 `scripts/*.ps1`，不依赖 Git Bash；`dev.bat` 构建前用 `scripts/ensure-closed.ps1 -Force` 关闭运行中的 DeskPins，`package.bat` 用同一脚本先询问。`verify.bat` 先构建 + 回归，再用 Git Bash 跑 `check-docs.sh`。失败时暂停，`DESKPINS_NO_PAUSE=1` 可跳过。
+- **脚本分工**：`ensure-closed.ps1` 检测 / 关闭 DeskPins（`-Force` 不询问，否则 `Read-Host` 确认）；`build.ps1` Release 构建（`-Test` 追加回归）并复制到 `.runtime/build/dev/`；`run.ps1` 启动（`-Development` 先构建）；`package.ps1` 构建 Debug / Release、跑回归，按 `dist/dev` 与 `dist/release` 出包；`PackageTransaction.ps1` 负责 zip 校验与发布回滚；`benchmark.ps1` 独立数据测量；`smoke-test.ps1` 从 `dist/release` 的 zip 解压并以隔离数据启动、验证单实例导入。
+- **出包布局**：模板 `dotnet-native-desktop` 的默认 `package.ps1` 只把单个 zip 写到 `dist/`；本项目按 explorer-tabs / git-extensions 的约定改为 `dist/dev/DeskPins_<版本>_x64-unpack-debug.zip`（Debug + PDB + 构建日志 + `build-info.txt`）与 `dist/release/unpack/` + `dist/release/DeskPins_<版本>_x64-unpack.zip` + `SHA256SUMS.txt`（另含 `unpack-manifest.json`）。发布前校验 zip；失败时保留旧包并回滚，不删除历史 `dist/` 内容。
+- **版本号**：只在 `Directory.Build.props`；打包脚本从该文件读取。
+- **已知限制**：开发实例运行时 `.runtime/build/dev/DeskPins.exe` 被占用，`build.ps1` / `test.bat` / `verify.bat` 的复制步骤会失败；`dev.bat` / `package.bat` 会先处理运行实例。
+
+---
+
+## 7. 易踩的坑 / 设计取舍
 
 - 纯 WPF 是用户明确选择；不引入 WebView / Electron / React 界面。
 - 功能参考与实现证据分别记录；功能名称存在不代表行为已经等价。

@@ -12,13 +12,13 @@
 
 ## 快速开始
 
-在 Windows x64 双击 `build.bat` 构建，随后双击 `run.bat` 运行；`dev.bat` 合并这两步。双击 `verify.bat` 执行构建、回归与协作文档体检，`package.bat` 生成 `dist/` 下的免安装包。
+在 Windows x64 双击 `build.bat` 构建，随后双击 `run.bat` 运行；`dev.bat` 合并这两步，并会先强制关闭正在运行的 DeskPins。双击 `verify.bat` 执行构建、回归与协作文档体检；`package.bat` 生成 `dist/dev` 调试包与 `dist/release` 免安装包（含 `unpack/`、zip 与 SHA256SUMS），检测到运行实例时会先询问是否关闭，取消则退出。
 
 程序默认将数据存于当前用户的 `%LOCALAPPDATA%/DeskPins`。免安装包直接运行 `DeskPins.exe`；指定独立或便携数据目录可使用 `DeskPins.exe --data-dir "C:\path\to\notes"`。不要与原版 Stickies 共享数据库。
 
 ## manager.sh 命令一览
 
-在 Git Bash 中执行 `sh manager.sh <命令>`；Windows 双击脚本调用同一命令源。
+在 Git Bash 中执行 `sh manager.sh <命令>`；Windows 双击脚本直接调用同一组 `scripts/*.ps1`，构建 / 运行 / 测试 / 打包不需要 Git Bash。
 
 | 命令 | 说明 |
 |---|---|
@@ -27,14 +27,14 @@
 | `verify` | 构建、回归和文档检查 |
 | `dev` | 构建并启动开发版 |
 | `run` | 启动已构建应用 |
-| `package` | 生成 x64 免安装包与 SHA256 |
+| `package` | 生成 `dist/dev` 调试包与 `dist/release` 免安装包（含 SHA256） |
 | `benchmark` | 用独立数据测量启动与内存 |
 | `smoke` | 用独立数据验证免安装包启动和单实例导入 |
-| `check-docs` | 检查协作文档 |
+| `check-docs` | 检查协作文档（可传 `--strict`） |
 
 ## 依赖与前置条件
 
-运行需要 Windows 10 / 11 x64 和 .NET Framework 4.8。开发需要 .NET SDK、.NET Framework 4.8 Developer Pack 和 Git for Windows（双击脚本使用其中的 Git Bash）。无需 Node、浏览器组件或第三方运行时。
+运行需要 Windows 10 / 11 x64 和 .NET Framework 4.8。开发需要 .NET SDK 与 .NET Framework 4.8 Developer Pack；命令行 `manager.sh`、文档检查和 `verify.bat` 还需要 Git for Windows（提供 bash），双击 `build / dev / run / test / package` 只需 PowerShell。无需 Node、浏览器组件或第三方运行时。
 
 ## 技术栈
 
@@ -42,6 +42,6 @@ C# / WPF / .NET Framework 4.8 / x64；面向 Windows 10 / 11，免安装，优�
 
 ## 协作文档
 
-从 [AGENTS.md](AGENTS.md) 开始，代码位置见 [ARCHITECTURE.md](ARCHITECTURE.md)，当前进度见 [HANDOFF.md](HANDOFF.md)。文档体系来源于 vibe-coding-starter 2026-11-10.1，类型标记为 custom + base_type=dotnet-native-desktop；脚手架仍是项目自有的纯 WPF 实现。
+从 [AGENTS.md](AGENTS.md) 开始，代码位置见 [ARCHITECTURE.md](ARCHITECTURE.md)，当前进度见 [HANDOFF.md](HANDOFF.md)。文档体系来源于 vibe-coding-starter 2026-11-11.1，类型标记为 custom + base_type=dotnet-native-desktop；脚手架仍是项目自有的纯 WPF 实现。
 
 运行 `sh manager.sh check-docs` 检查文档。具体操作和扩展例子见 [使用说明](docs/02-使用说明.md)。

@@ -2,6 +2,6 @@
 type=custom
 base_type=dotnet-native-desktop
 project_name=desk-pins
-template_version=2026-11-10.1
+template_version=2026-11-11.1
 created=2026-11-07
 upgraded=2026-11-11

@@ -379,6 +379,11 @@ namespace DeskPins.Tests
             var stack = new StackWindow(host, new NoteStack { Name = "Sample stack with a long title that must be trimmed", Width = 240, Height = 60 }); stack.Refresh(); Check(Math.Abs(stack.Width - 240) < .1 && Math.Abs(stack.Height - 60) < .1, "stack window restores its saved size"); Layout(stack, 240, 60, "stack"); stack.Close();
             var topStack = new StackWindow(host, new NoteStack { Name = "Topmost stack", Topmost = true }); Check(topStack.Topmost, "stack window reads saved topmost state"); topStack.Close();
             var backupFile = Path.Combine(Path.GetDirectoryName(host.Library.Repository.FilePath), "layout-backup.db"); host.Library.Repository.Backup(backupFile); var backup = new BackupBrowserWindow(host, backupFile); Layout(backup, 444, 280, "backup"); Check(Descendants((DependencyObject)backup.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "取消").IsCancel, "backup browser supports Escape cancel"); backup.Close();
+            var about = new AboutWindow();
+            var aboutTexts = Descendants((DependencyObject)about.Content).OfType<System.Windows.Controls.TextBlock>().Select(t => t.Text).ToArray();
+            Check(aboutTexts.Contains("DeskPins") && aboutTexts.Any(t => t.Contains("作者 @zouv")), "about shows product name and author");
+            Check(Descendants((DependencyObject)about.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "关闭").IsCancel, "about supports Escape close");
+            Layout(about, 480, 220, "about"); about.Close();
             reminder.Close(); configuration.Close(); attachment.Close();
         }
     }

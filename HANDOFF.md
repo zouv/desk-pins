@@ -1,39 +1,50 @@
 # 会话接力 · DeskPins
 
+> 维护规则见 AGENTS §5.1：只留还在路上的内容；任务完结时删掉开工写下的计划痕迹。
+
 ## 状态快照
 
-- 日期：2026-11-11。
-- 状态：0.2.0 管理体验版已打包并发布 GitHub Release；Release 构建、208 项自动回归、manager 全分类离屏布局与包内进程 smoke 通过。真实桌面交互 / 视觉仍待验收。无进行中代码任务。
-- 分支：main；版本：0.2.0（2026-11-11），CHANGELOG `[未发布]` 为空。
+- 最近更新：2026-11-11。
+- 整体状态：✅ 无进行中的代码任务；0.2.0 已发布，真实桌面交互 / 视觉待验收。
+- 工作分支：main。
+- 最后验证状态：0.2.0 Release 构建、208 项回归与离屏布局通过（细节见 CHANGELOG 0.2.0）；当前 Release 构建 0 警告 / 0 错误、210 项回归（含关于窗口）通过；本轮 `sh check-docs.sh --strict` 通过，`build.bat` / `verify.bat` / `ensure-closed.ps1` 已实测，`package.ps1` 全量出包与 `smoke-test.ps1` 通过。文档体系已升级到 vibe-coding-starter 2026-11-11.1；模板五种桌面类型的出包脚本已分别用 net8 / net48、WebView2、Tauri、Electron、Rust 实际构建验证。
 
 ## 当前任务
 
 - 无进行中代码任务。总目标与剩余工作见 ROADMAP 与 docs/03-功能对照.md。
 
-## 进行中 / 确切断点
+## 进行中
 
-- 无。P11 覆盖 ManagerWindow（主布局 / Collections / Calendar / Search 四个 partial）、CollectionEditor / SearchTagWindow、Models 展示字段与 Settings 搜索选项、Localization 与回归。
-
-## 最后验证
-
-- `dotnet build DeskPins.sln -c Release`：0 警告 / 0 错误。
-- `tests/DeskPins.Tests/bin/Release/net48/DeskPins.Tests.exe --ui --audit-dir .runtime/ui-audit-p11`：208 项通过；已检查 manager-category-0…10（含月历与搜索查找栏）、manager-default / manager-minimum、settings 0…8、note-text 等离屏布局图。
-- 新增回归覆盖：导轨 Tags / Stored 重排、Closed 短 Id、文件夹 / 堆叠 / 标签拖拽排序、文件夹改父目录与循环拒绝、搜索范围 / 标签过滤、便签 Id 前缀搜索、搜索标签对话框、月历日格数量。
-- `sh manager.sh verify` 的构建 / 208 项回归通过，但复制 `.runtime/build/dev/DeskPins.exe` 时因该文件正被运行中的开发实例占用而失败；随后单独执行 `sh check-docs.sh` 通过，0 项警告。
-- 免安装包从本轮 Release 构建输出生成（同一布局）：`dist/DeskPins-0.2.0-x64.zip`，SHA256 `BC7D26AAAB712A03581EA4B2191C782E912B880ED42C2463B0E0131149D670D4`；`sh manager.sh smoke` 通过（单实例导入、隔离数据、进程退出）。
-- 包与 benchmark 未在本轮重跑 benchmark；包已随 GitHub Release 上传。
-
-## 下一步
-
-1. 在真实桌面验收 P11：Stored / Stacks / Tags 的新建 / 删除 / 改名 / 属性、树内拖拽排序与改父目录、分类计数、月历点击与翻月、底部查找栏与标签过滤对话框、Closed 短 Id。
-2. 继续验收 P10：分类三栏 / 两栏布局、Home / Closed、分隔条宽度记忆、设置 9 页、托盘精简后的 Data 操作、自定义数据目录重启与迁移。
-3. 实测普通按键快捷键、全局管理快捷键、启动隐藏 / 关闭确认 / 点击显示全部便签、吸附距离、锁定防移动与卷起独立位置。
-4. 继续 docs/03 剩余列与原版兼容项（F05 / F12 / F13 / F16 / F18、TCP / SMTP、系统恢复）。
+- 无。
 
 ## 待验收
 
-- P11：集合增删改属性、Tag / Stack 颜色、文件夹父级、树内拖拽排序 / 改父目录、分类计数、月历、查找栏范围 / 标签过滤 / Pin、Closed 短 Id。
-- P10：Manage Notes 左侧图标栏、三栏 / 两栏布局、Home 仪表盘、分隔条宽度记忆；设置-数据页与自定义数据目录重启生效。
+- P10 / P11：Manage Notes 三栏 / 两栏与 Home 仪表盘、集合增删改属性、Tag / Stack 颜色、文件夹父级与树内拖拽排序、分类计数、月历、查找栏范围 / 标签过滤 / Pin、Closed 短 Id；设置-数据页与自定义数据目录重启生效。
 - 快捷键按键框可录入普通按键，全局“管理便签”可启用；设置 Appearance / Content / Alerts / Desktop 的新控件与行为。
 - 便签 / 堆叠缩放、联动置顶、文本行距与不透明度等既有修复仍正常。
-- 真实桌面托盘、Ghost、多屏 DPI、外部发送与原版交互一致性继续验收。
+- 真实桌面托盘（含“关于 DeskPins”窗口）、Ghost、多屏 DPI、外部发送与原版交互一致性继续验收。
+- 双击脚本与出包布局：未安装 Git Bash 的机器可双击 build / dev / run / test / package；`dev.bat` 会强制关闭运行中的 DeskPins，`package.bat` 会先询问并支持取消；`dist/dev` 输出 Debug 调试包，`dist/release` 输出可运行 `unpack/`、免安装 zip 与 SHA256SUMS；`verify.bat` 能找到 Git Bash 并跑完文档检查。
+
+## 阻塞 / 待决策
+
+- 无。
+
+## 下一步
+
+1. 在真实桌面验收 P10 / P11 的管理器布局、集合操作、月历与查找栏。
+2. 实测普通按键快捷键、全局管理快捷键、启动隐藏 / 关闭确认 / 点击显示全部便签、吸附距离、锁定防移动与卷起独立位置。
+3. 继续 docs/03 剩余列与原版兼容项（F05 / F12 / F13 / F16 / F18、TCP / SMTP、系统恢复）。
+4. 若要用 test.bat / verify.bat，先退出运行中的 DeskPins，避免 `.runtime/build/dev/DeskPins.exe` 被占用；dev.bat / package.bat 已自动处理运行实例。
+5. 决定是否清理 `dist/` 根目录下旧布局的 `DeskPins-0.1.x` / `0.2.0` 历史包；新布局只在 `dist/dev` 与 `dist/release`。
+
+## 本任务验证
+
+- 本轮改文档体系、双击脚本、ARCH 图谱与出包布局；`sh check-docs.sh --strict` 通过，`build.bat` 已实测，`verify.bat` 的构建 / 208 项回归通过，bash 分支单独实测通过。`ensure-closed.ps1` 用临时 `DeskPinsTest.exe` 验证了 `-Force`、输入 `n` 取消、输入 `y` 确认三条路径；`package.bat` 对真实运行实例输入 `n` 后正确退出且未关闭应用。`package.ps1` 全量运行通过：Debug / Release 构建、208 项回归、zip 校验与事务发布；`smoke-test.ps1` 从 `dist/release` 的 zip 解压启动并完成单实例导入。未对真实实例执行强制关闭。
+
+## 本任务决策
+
+- 出包布局按用户参考项目 explorer-tabs / git-extensions 采用 `dist/dev` + `dist/release`；模板 dotnet 类型默认只输出单个 zip，未采用模板默认布局。该约定已写入 ARCH §6。
+
+## 待解问题
+
+- 无。
