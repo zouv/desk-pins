@@ -109,7 +109,7 @@ namespace DeskPins.App
             if (tray != null) tray.Text = hidden ? "DeskPins · " + Ui.Text("便签已隐藏") : "DeskPins · " + Library.Notes.Count + " " + Ui.Text("张便签");
         }
         public Note New(NoteKind? kind = null, bool paste = false) { hidden = false; solo = ""; var n = Library.Create(kind ?? Library.Catalog.Settings.DefaultKind); Sync(); Focus(n); if (paste) { NoteWindow w; if (Windows.TryGetValue(n.Id, out w)) Paste(w); } return n; }
-        public void Focus(Note n) { hidden = false; solo = ""; if (n.State != NoteState.Desktop) Library.Move(n, NoteState.Desktop); var stack = Library.Catalog.Stacks.FirstOrDefault(s => s.Id == n.StackId); if (stack != null) stack.Expanded = true; Sync(); NoteWindow w; if (Windows.TryGetValue(n.Id, out w)) { w.Show(); Native.ShowWindow(new WindowInteropHelper(w).Handle, 5); w.Activate(); if (w.TextEditor != null) w.TextEditor.Focus(); else if (w.ImageEditor != null) w.ImageEditor.Focus(); } BringStacksForward(); }
+        public void Focus(Note n) { hidden = false; solo = ""; if (n.State != NoteState.Desktop) Library.Move(n, NoteState.Desktop); var stack = Library.Catalog.Stacks.FirstOrDefault(s => s.Id == n.StackId); if (stack != null) stack.Expanded = true; Sync(); NoteWindow w; if (Windows.TryGetValue(n.Id, out w)) { if (!testMode) { w.Show(); Native.ShowWindow(new WindowInteropHelper(w).Handle, 5); w.Activate(); } if (w.TextEditor != null) w.TextEditor.Focus(); else if (w.ImageEditor != null) w.ImageEditor.Focus(); } BringStacksForward(); }
         public void Cycle(Note n, int step) { var notes = Windows.Values.Select(w => w.Note).ToList(); int i = notes.FindIndex(x => x.Id == n.Id); if (notes.Count > 0) Focus(notes[(i + step + notes.Count) % notes.Count]); }
         public void ReloadWindow(Note n) { NoteWindow w; if (Windows.TryGetValue(n.Id, out w)) w.ReloadContent(); }
         public void ReloadPosition(Note n) { NoteWindow w; if (Windows.TryGetValue(n.Id, out w)) w.ApplyModel(); }
@@ -144,6 +144,7 @@ namespace DeskPins.App
         }
         public void BringStacksForward()
         {
+            if (testMode) return;
             foreach (var w in stacks.Values) w.BringForward();
         }
         public void ShowAllNotes()
@@ -153,7 +154,7 @@ namespace DeskPins.App
             try
             {
                 hidden = false; solo = ""; Sync();
-                foreach (var w in Windows.Values) Native.RaiseNoActivate(w);
+                if (!testMode) foreach (var w in Windows.Values) Native.RaiseNoActivate(w);
                 BringStacksForward();
             }
             finally { revealingNotes = false; }
@@ -161,11 +162,11 @@ namespace DeskPins.App
         public void SaveSelected() { foreach (var id in Selected.ToArray()) { Note n; if (Library.Notes.TryGetValue(id, out n)) Library.Save(n); } }
         public void SetColor(Note n) { var c = Ui.Color(n.Color); if (c == null) return; foreach (var target in Targets(n)) { target.Color = c; Library.Save(target); } foreach (var w in Windows.Values) w.RefreshAppearance(); }
         public void Solo(Note n) { FlushAll(); solo = solo == n.Id ? "" : n.Id; Sync(); }
-        public void ToggleAll() { FlushAll(); hidden = !hidden; Sync(); foreach (var w in stacks.Values) { if (hidden) w.Hide(); else w.Show(); } }
+        public void ToggleAll() { FlushAll(); hidden = !hidden; Sync(); if (!testMode) foreach (var w in stacks.Values) { if (hidden) w.Hide(); else w.Show(); } }
         public void SetHidden(bool value) { if (hidden != value) ToggleAll(); }
         public bool Hidden { get { return hidden; } }
         public void Rescue() { foreach (var n in Library.Notes.Values.Where(n => n.State == NoteState.Desktop)) { FlushNote(n); var b = Native.Clamp(new Rect(n.Left, n.Top, n.Width, n.Height)); n.Left = b.Left; n.Top = b.Top; Library.Save(n); ReloadPosition(n); } }
-        public void BringForward() { hidden = false; Sync(); foreach (var w in Windows.Values) { w.Show(); Native.ShowWindow(new WindowInteropHelper(w).Handle, 5); w.Activate(); } BringStacksForward(); }
+        public void BringForward() { hidden = false; Sync(); if (testMode) return; foreach (var w in Windows.Values) { w.Show(); Native.ShowWindow(new WindowInteropHelper(w).Handle, 5); w.Activate(); } BringStacksForward(); }
         public void FlushNote(Note n) { NoteWindow w; if (Windows.TryGetValue(n.Id, out w)) w.Flush(); if (manager != null) manager.FlushPending(n); }
         public void FlushAll() { foreach (var w in Windows.Values.ToArray()) w.Flush(); if (manager != null) manager.FlushPending(); }
         public void Manage() { if (manager == null) { manager = new ManagerWindow(this); manager.Closed += (s, e) => manager = null; } manager.Show(); manager.Activate(); }

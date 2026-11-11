@@ -8,6 +8,10 @@
 
 - 托盘“关于 DeskPins”改为独立关于窗口，显示产品名、版本、作者和功能简介；支持 Esc 关闭。
 
+### 修复
+
+- 修复运行 `package.bat` 时 UI 回归测试会短暂弹出便签窗口的问题；测试模式不再显示便签与堆叠窗口。
+
 ### 变更
 
 - 文档体系同步 vibe-coding-starter 最新机械修复：`check-docs.sh` 接受 `**/node_modules/`、`**/.venv/` 写法，`manager.sh check-docs` 透传 `--strict` 等参数。

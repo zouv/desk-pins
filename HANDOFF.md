@@ -7,7 +7,7 @@
 - 最近更新：2026-11-11。
 - 整体状态：✅ 无进行中的代码任务；0.2.0 已发布，真实桌面交互 / 视觉待验收。
 - 工作分支：main。
-- 最后验证状态：0.2.0 Release 构建、208 项回归与离屏布局通过（细节见 CHANGELOG 0.2.0）；当前 Release 构建 0 警告 / 0 错误、210 项回归（含关于窗口）通过；本轮 `sh check-docs.sh --strict` 通过，`build.bat` / `verify.bat` / `ensure-closed.ps1` 已实测，`package.ps1` 全量出包与 `smoke-test.ps1` 通过。文档体系已升级到 vibe-coding-starter 2026-11-11.1；模板五种桌面类型的出包脚本已分别用 net8 / net48、WebView2、Tauri、Electron、Rust 实际构建验证。
+- 最后验证状态：0.2.0 Release 构建、208 项回归与离屏布局通过（细节见 CHANGELOG 0.2.0）；当前 Release 构建 0 警告 / 0 错误、210 项回归（含关于窗口）通过，测试模式已不再显示便签 / 堆叠窗口；本轮 `sh check-docs.sh --strict` 通过，`build.bat` / `verify.bat` / `ensure-closed.ps1` 已实测，`package.ps1` 全量出包与 `smoke-test.ps1` 通过。文档体系已升级到 vibe-coding-starter 2026-11-11.1；模板五种桌面类型的出包脚本已分别用 net8 / net48、WebView2、Tauri、Electron、Rust 实际构建验证。
 
 ## 当前任务
 

@@ -184,3 +184,4 @@ WPF 便签 / 管理 / 设置
 - 日历与搜索是同一套筛选的两处呈现：日格计数与日历列表必须共用 MatchesDate；搜索的范围 / 标签 / 正文开关必须同时作用于 SearchResults，不要在 Refresh 的 switch 里另外拼一套条件。
 - 快捷键格式不要只用 KeyGestureConverter：它拒绝无修饰的普通字符键。统一使用 Ui.TryParseGesture / FormatGesture；全局快捷键必须带修饰键或功能键。
 - 快捷键启停以空手势表达，不要用“删除自定义项”表示停用，否则会退回默认手势并重新生效。
+- UI 测试使用 `new AppHost(..., testMode: true)`；`Focus` / `BringForward` / `ToggleAll` / `ShowAllNotes` / `BringStacksForward` 等会 `Show()` 窗口的路径必须尊重 `testMode`，否则 `package.bat` 跑 UI 回归时会闪一下便签窗口。
