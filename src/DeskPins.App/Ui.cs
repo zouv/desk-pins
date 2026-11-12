@@ -27,29 +27,59 @@ namespace DeskPins.App
         public static Effect NoteShadow(bool enabled) { return enabled ? noteShadow : null; }
         public static Brush Brush(string color) { Brush cached; if (color != null && brushCache.TryGetValue(color, out cached)) return cached; try { var b = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color)); b.Freeze(); brushCache[color] = b; return b; } catch { return Brushes.LightYellow; } }
         public static Brush TextOn(string color) { try { var c = (Color)ColorConverter.ConvertFromString(color); return .299 * c.R + .587 * c.G + .114 * c.B > 150 ? Brushes.Black : Brushes.White; } catch { return Brushes.Black; } }
-        public static Button Button(string text, Action click, double width = double.NaN) { var b = new Button { Content = Text(text), Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(4), MinHeight = 28, Width = width }; b.Click += (s, e) => { try { click(); } catch (Exception ex) { Error(ex); } }; return b; }
-        public static void FitDialog(Window window, double minWidth = 360, double minHeight = 240) { var area = SystemParameters.WorkArea; window.MaxWidth = area.Width; window.MaxHeight = area.Height; window.MinWidth = Math.Min(minWidth, area.Width); window.MinHeight = Math.Min(minHeight, area.Height); window.UseLayoutRounding = true; window.SnapsToDevicePixels = true; if (!window.ShowInTaskbar && Application.Current != null) foreach (Window candidate in Application.Current.Windows) if (candidate != window && candidate.IsActive && candidate.IsVisible) { window.Owner = candidate; window.WindowStartupLocation = WindowStartupLocation.CenterOwner; break; } }
-        public static MenuItem Item(string text, Action click, string shortcut = "", bool? check = null)
+        public static Button Button(string text, Action click, double width = double.NaN) { return CreateButton(text, click, width, false, false); }
+        public static Button PrimaryButton(string text, Action click, double width = double.NaN) { return CreateButton(text, click, width, true, false); }
+        public static Button DangerButton(string text, Action click, double width = double.NaN) { return CreateButton(text, click, width, false, true); }
+        private static Button CreateButton(string text, Action click, double width, bool primary, bool danger)
         {
-            var m = new MenuItem { Header = Text(text), InputGestureText = shortcut, IsCheckable = check.HasValue, IsChecked = check ?? false };
-            m.Click += (s, e) => { e.Handled = true; try { click(); } catch (Exception ex) { Error(ex); } }; return m;
+            var b = new Button { Content = Text(text), Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(4), MinHeight = 30, Width = width, Style = UiTheme.ButtonStyle(primary, danger) };
+            b.Click += (s, e) => { try { click(); } catch (Exception ex) { Error(ex, Window.GetWindow(b)); } }; return b;
+        }
+        public static void FitDialog(Window window, double minWidth = 360, double minHeight = 240)
+        {
+            var area = SystemParameters.WorkArea; window.MaxWidth = area.Width; window.MaxHeight = area.Height; window.MinWidth = Math.Min(minWidth, area.Width); window.MinHeight = Math.Min(minHeight, area.Height); window.UseLayoutRounding = true; window.SnapsToDevicePixels = true;
+            if (!window.ShowInTaskbar && window.Owner == null) window.Owner = ActiveWindow(window);
+            if (window.Owner != null) window.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        }
+        public static Window ActiveWindow(Window exclude = null)
+        {
+            if (Application.Current == null) return null;
+            foreach (Window candidate in Application.Current.Windows) if (candidate != exclude && candidate.IsActive && candidate.IsVisible) return candidate;
+            return null;
+        }
+        public static void DialogContent(Window window, UIElement body, params UIElement[] buttons)
+        {
+            UiTheme.Apply(window);
+            var root = new DockPanel();
+            var bar = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(12, 8, 12, 8) };
+            foreach (var button in buttons) bar.Children.Add(button);
+            var footer = new Border { Background = UiTheme.Background, BorderBrush = UiTheme.Border, BorderThickness = new Thickness(0, 1, 0, 0), Child = bar };
+            DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer);
+            root.Children.Add(new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(16) });
+            window.Content = root;
+        }
+        public static MenuItem Item(string text, Action click, string shortcut = "", bool? check = null, bool enabled = true)
+        {
+            var m = new MenuItem { Header = Text(text), InputGestureText = shortcut, IsCheckable = check.HasValue, IsChecked = check ?? false, IsEnabled = enabled };
+            m.Click += (s, e) => { e.Handled = true; try { click(); } catch (Exception ex) { Error(ex, Window.GetWindow(m)); } }; return m;
         }
         public static MenuItem Sub(string text, params object[] items) { var m = new MenuItem { Header = Text(text) }; foreach (var i in items) m.Items.Add(i); return m; }
-        public static void Error(Exception ex) { MessageBox.Show(Text(ex.Message), "DeskPins", MessageBoxButton.OK, MessageBoxImage.Warning); }
-        public static string Ask(string title, string label, string initial = "", bool password = false)
+        public static void Error(Exception ex, Window owner = null) { owner = owner ?? ActiveWindow(); if (owner != null && owner.IsVisible) MessageBox.Show(owner, Text(ex.Message), "DeskPins", MessageBoxButton.OK, MessageBoxImage.Warning); else MessageBox.Show(Text(ex.Message), "DeskPins", MessageBoxButton.OK, MessageBoxImage.Warning); }
+        public static string Ask(string title, string label, string initial = "", bool password = false, Window owner = null)
         {
-            var window = new Window { Title = Text(title), Width = 420, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterScreen, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false };
+            var window = new Window { Title = Text(title), Width = 420, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterScreen, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, Owner = owner };
             FitDialog(window, 360, 0);
-            var panel = new StackPanel { Margin = new Thickness(16) }; panel.Children.Add(new TextBlock { Text = Text(label), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) });
-            TextBox text = null; PasswordBox secret = null; if (password) { secret = new PasswordBox { MinWidth = 300, Margin = new Thickness(0, 0, 0, 12) }; panel.Children.Add(secret); } else { text = new TextBox { Text = initial, MinWidth = 300, Margin = new Thickness(0, 0, 0, 12) }; panel.Children.Add(text); }
-            string result = null; var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-            var ok = Button("确定", () => { result = password ? secret.Password : text.Text; window.DialogResult = true; }); ok.IsDefault = true; buttons.Children.Add(ok); var cancel = Button("取消", () => window.Close()); cancel.IsCancel = true; buttons.Children.Add(cancel); panel.Children.Add(buttons); window.Content = panel;
+            var panel = new StackPanel(); panel.Children.Add(new TextBlock { Text = Text(label), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) });
+            TextBox text = null; PasswordBox secret = null; if (password) { secret = new PasswordBox { Margin = new Thickness(0, 0, 0, 12) }; System.Windows.Automation.AutomationProperties.SetName(secret, Text(label)); panel.Children.Add(secret); } else { text = new TextBox { Text = initial, Margin = new Thickness(0, 0, 0, 12) }; System.Windows.Automation.AutomationProperties.SetName(text, Text(label)); panel.Children.Add(text); }
+            string result = null;
+            var ok = PrimaryButton("确定", () => { result = password ? secret.Password : text.Text; window.DialogResult = true; }); ok.IsDefault = true;
+            var cancel = Button("取消", () => window.Close()); cancel.IsCancel = true; DialogContent(window, panel, ok, cancel);
             window.Loaded += (s, e) => window.Dispatcher.BeginInvoke(new Action(() => { if (password) { secret.Focus(); secret.SelectAll(); } else { text.Focus(); text.SelectAll(); } }), System.Windows.Threading.DispatcherPriority.Input); window.ShowDialog(); return result;
         }
-        public static bool Confirm(string message) { return MessageBox.Show(Text(message), "DeskPins", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes; }
+        public static bool Confirm(string message, Window owner = null) { owner = owner ?? ActiveWindow(); return (owner != null && owner.IsVisible ? MessageBox.Show(owner, Text(message), "DeskPins", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) : MessageBox.Show(Text(message), "DeskPins", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No)) == MessageBoxResult.Yes; }
         private static string TranslateFilter(string filter) { if (string.IsNullOrEmpty(filter)) return filter; var parts = filter.Split('|'); for (int i = 0; i < parts.Length; i += 2) parts[i] = Text(parts[i]); return string.Join("|", parts); }
-        public static string OpenFile(string filter) { var d = new Microsoft.Win32.OpenFileDialog { Filter = TranslateFilter(filter) }; return d.ShowDialog() == true ? d.FileName : null; }
-        public static string SaveFile(string filter, string name = "") { var d = new Microsoft.Win32.SaveFileDialog { Filter = TranslateFilter(filter), FileName = name }; return d.ShowDialog() == true ? d.FileName : null; }
+        public static string OpenFile(string filter, Window owner = null) { var d = new Microsoft.Win32.OpenFileDialog { Filter = TranslateFilter(filter) }; owner = owner ?? ActiveWindow(); return (owner == null ? d.ShowDialog() : d.ShowDialog(owner)) == true ? d.FileName : null; }
+        public static string SaveFile(string filter, string name = "", Window owner = null) { var d = new Microsoft.Win32.SaveFileDialog { Filter = TranslateFilter(filter), FileName = name }; owner = owner ?? ActiveWindow(); return (owner == null ? d.ShowDialog() : d.ShowDialog(owner)) == true ? d.FileName : null; }
         public static string Color(string initial)
         {
             using (var d = new System.Windows.Forms.ColorDialog { FullOpen = true, Color = System.Drawing.ColorTranslator.FromHtml(initial) }) return d.ShowDialog() == System.Windows.Forms.DialogResult.OK ? "#" + d.Color.R.ToString("X2") + d.Color.G.ToString("X2") + d.Color.B.ToString("X2") : null;

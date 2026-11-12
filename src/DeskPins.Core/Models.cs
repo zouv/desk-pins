@@ -130,6 +130,8 @@ namespace DeskPins.Core
         [DataMember] public Dictionary<int, int> ManagerOrders = new Dictionary<int, int>();
         [DataMember] public Dictionary<int, double> ManagerOutlineWidths = new Dictionary<int, double>();
         [DataMember] public Dictionary<int, double> ManagerListWidths = new Dictionary<int, double>();
+        [DataMember] public Dictionary<int, List<string>> ManagerSelectedNoteIds = new Dictionary<int, List<string>>();
+        [DataMember] public Dictionary<int, string> ManagerFilters = new Dictionary<int, string>();
         [DataMember] public int ManagerCategory;
         [DataMember] public string ManagerFolderFilter = "", ManagerStackFilter = "", ManagerTagFilter = "", ManagerSelectedNoteId = "";
         [DataMember] public DateTime ManagerCalendarDate = DateTime.Today;
@@ -159,6 +161,8 @@ namespace DeskPins.Core
             if (ManagerOrders == null) ManagerOrders = new Dictionary<int, int>();
             if (ManagerOutlineWidths == null) ManagerOutlineWidths = new Dictionary<int, double>();
             if (ManagerListWidths == null) ManagerListWidths = new Dictionary<int, double>();
+            if (ManagerSelectedNoteIds == null) ManagerSelectedNoteIds = new Dictionary<int, List<string>>();
+            if (ManagerFilters == null) ManagerFilters = new Dictionary<int, string>();
             if (ManagerCategory < 0 || ManagerCategory > 10) ManagerCategory = 0;
             if (ManagerFolderFilter == null) ManagerFolderFilter = "";
             if (ManagerStackFilter == null) ManagerStackFilter = "";

@@ -45,7 +45,7 @@ namespace DeskPins.App
         private ManagerWindow manager;
         private SettingsWindow settingsWindow;
         private string appliedLanguage;
-        private bool syncPending, hidden, disposed, startupRestoring, revealingNotes;
+        private bool syncPending, hidden, disposed, startupRestoring, revealingNotes, storageFailed;
         private string solo = "";
         private TcpListener listener;
         private SoundPlayer sound;
@@ -54,6 +54,7 @@ namespace DeskPins.App
         private readonly HashSet<string> attachedVisible = new HashSet<string>();
         private readonly DispatcherTimer attachmentDebounce;
         public bool Exiting { get; private set; }
+        public bool StorageFailed { get { return storageFailed; } }
         public string SoloId { get { return solo; } }
         public string DataDirectory { get { return Path.GetFullPath(Path.GetDirectoryName(Library.Repository.FilePath)); } }
         public readonly ApiService Api;
@@ -191,16 +192,42 @@ namespace DeskPins.App
                 settingsWindow.Activate();
             }
         }
-        public void ApplyDataDirectory(string target, string pointerFile = null)
+        public void ValidateDataDirectory(string target)
         {
+            if (string.IsNullOrWhiteSpace(target)) throw new ArgumentException(Ui.Text("请选择数据目录。"));
             var full = Path.GetFullPath(target); var current = DataDirectory;
             if (DataLocation.Same(full, current)) return;
-            if (full.TrimEnd(Path.DirectorySeparatorChar).StartsWith(current.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            if (File.Exists(full)) throw new ArgumentException(Ui.Text("数据目录不能是文件。"));
+            if (full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).StartsWith(current.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 throw new ArgumentException(Ui.Text("不能把数据目录设置到当前数据目录的子目录。"));
+            var targetDatabase = Path.Combine(full, "deskpins.db");
+            if (File.Exists(targetDatabase)) ValidateDatabase(targetDatabase);
+        }
+        private static void ValidateDatabase(string file)
+        {
+            using (var db = new Sqlite(file, true))
+            {
+                var check = db.Query("PRAGMA quick_check;");
+                if (check.Count != 1 || (string)check[0][0] != "ok") throw new IOException(Ui.Text("备份已损坏。"));
+                if (Convert.ToInt32(db.Query("PRAGMA user_version;")[0][0]) > 1) throw new IOException(Ui.Text("数据库由更新版本创建，请升级 DeskPins。"));
+                var ids = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var row in db.Query("SELECT id,metadata FROM notes;"))
+                {
+                    var note = Json.Read<Note>((string)row[1]);
+                    if (note == null || string.IsNullOrWhiteSpace(note.Id) || !string.Equals(note.Id, row[0] as string, StringComparison.Ordinal) || !ids.Add(note.Id)) throw new IOException(Ui.Text("便签元数据无效。"));
+                }
+                var rows = db.Query("SELECT payload FROM catalog WHERE id=1;");
+                if (rows.Count > 0) { var catalog = Json.Read<Catalog>((string)rows[0][0]); if (catalog == null) throw new IOException(Ui.Text("数据库目录信息无效。")); catalog.Normalize(); }
+            }
+        }
+        public void ApplyDataDirectory(string target, string pointerFile = null)
+        {
+            ValidateDataDirectory(target);
+            var full = Path.GetFullPath(target);
+            if (DataLocation.Same(full, DataDirectory)) { DataLocation.SetCustom(full, pointerFile); return; }
             Directory.CreateDirectory(full);
             var targetDatabase = Path.Combine(full, "deskpins.db");
-            if (File.Exists(targetDatabase)) { using (new NoteRepository(targetDatabase)) { } }
-            else { FlushAll(); Library.Repository.Backup(targetDatabase); }
+            if (!File.Exists(targetDatabase)) { FlushAll(); Library.Repository.Backup(targetDatabase); }
             DataLocation.SetCustom(full, pointerFile);
         }
         public void Friends() { Collections("friends"); }
@@ -257,7 +284,46 @@ namespace DeskPins.App
         public void Backup() { FlushAll(); var file = Ui.SaveFile("DeskPins 数据库备份|*.dpbackup", "DeskPins-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".dpbackup"); if (file != null) Library.Repository.Backup(file); }
         public bool Restore(bool merge)
         {
-            var file = Ui.OpenFile("DeskPins 数据库 / 备份|*.dpbackup;*.db"); if (file == null) return false; if (!merge && !Ui.Confirm("用备份替换当前便签？将先保存当前数据备份。")) return false; FlushAll(); Library.Repository.Backup(Path.Combine(Path.GetDirectoryName(Library.Repository.FilePath), "before-restore-" + DateTime.Now.ToString("yyyyMMddHHmmss") + ".db")); Library.Repository.ImportBackup(file, merge); foreach (var w in Windows.Values.ToArray()) w.CloseInternal(false); Windows.Clear(); Library.Reload(); UpdateAttachments(); Sync(); ApplySettings(); return true;
+            var file = Ui.OpenFile("DeskPins 数据库 / 备份|*.dpbackup;*.db");
+            return file != null && RestoreBackup(file, merge);
+        }
+        public bool RestoreBackup(string file, bool merge, string[] selectedIds = null, Window owner = null)
+        {
+            ValidateDatabase(file);
+            string[] ids;
+            using (var source = new Sqlite(file, true)) ids = source.Query("SELECT id FROM notes;").Select(r => (string)r[0]).Where(id => selectedIds == null || selectedIds.Contains(id)).ToArray();
+            if (selectedIds != null && ids.Length == 0) return false;
+            var overwritten = ids.Count(id => Library.Notes.ContainsKey(id));
+            var message = string.Format(Ui.Text("将恢复 {0} 张便签，其中 {1} 张会覆盖当前版本。执行前将自动备份当前数据。"), ids.Length, overwritten);
+            if (!merge) message += "\n" + Ui.Text("完整恢复会替换当前全部便签和设置。此操作不受设置窗口的取消按钮影响。");
+            if (!Ui.Confirm(message, owner)) return false;
+            RestoreBackupData(file, merge, selectedIds);
+            return true;
+        }
+        public string RestoreBackupData(string file, bool merge, string[] selectedIds = null)
+        {
+            ValidateDatabase(file);
+            FlushAll();
+            var backup = Path.Combine(DataDirectory, "before-restore-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + "-" + Guid.NewGuid().ToString("N") + ".db");
+            Library.Repository.Backup(backup);
+            Library.Repository.ImportBackup(file, merge, selectedIds);
+            try { Library.Reload(); }
+            catch (Exception ex)
+            {
+                storageFailed = true; Exiting = true;
+                if (timer != null) timer.Change(Timeout.Infinite, Timeout.Infinite);
+                Library.Repository.Dispose();
+                throw new IOException(Ui.Text("恢复已提交，但数据重载失败。已停止数据库访问以防止旧数据回写，请关闭并重新启动 DeskPins；恢复前备份保留在数据目录。"), ex);
+            }
+            try
+            {
+                foreach (var w in Windows.Values.ToArray()) w.CloseInternal(false);
+                Windows.Clear(); UpdateAttachments(); Sync();
+                var errors = ApplySettingsReport();
+                if (errors.Count > 0) Ui.Error(new InvalidOperationException(Ui.Text("恢复已完成，但部分功能应用失败：") + "\n" + string.Join("\n", errors)));
+            }
+            catch (Exception ex) { Ui.Error(new InvalidOperationException(Ui.Text("恢复已完成，但部分功能应用失败：") + "\n" + ex.Message)); }
+            return backup;
         }
         public void Print(NoteWindow w) { w.Flush(); var d = new PrintDialog(); if (d.ShowDialog() != true) return; if (w.TextEditor != null) { var clone = new FlowDocument(); var range = new TextRange(clone.ContentStart, clone.ContentEnd); using (var stream = new MemoryStream(w.Note.Body)) range.Load(stream, DataFormats.Rtf); clone.PageWidth = d.PrintableAreaWidth; clone.PageHeight = d.PrintableAreaHeight; clone.PagePadding = new Thickness(30); d.PrintDocument(((IDocumentPaginatorSource)clone).DocumentPaginator, "DeskPins"); } else d.PrintVisual(w.ImageEditor, "DeskPins 图片便签"); }
         public async void Send(Note n, Friend friend)
@@ -291,19 +357,47 @@ namespace DeskPins.App
         }
         private void Tick() { if (disposed) return; try { Library.Tick(DateTime.UtcNow); var s = Library.Catalog.Settings; if (s.BackupHours > 0 && DateTime.UtcNow - s.LastBackupUtc > TimeSpan.FromHours(s.BackupHours)) { FlushAll(); string dir = Path.Combine(Path.GetDirectoryName(Library.Repository.FilePath), "backups"); Directory.CreateDirectory(dir); Library.Repository.Backup(Path.Combine(dir, "DeskPins-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".db")); s.LastBackupUtc = DateTime.UtcNow; Library.SaveCatalog(); } if (s.ClosedRetentionDays > 0) foreach (var n in Library.Notes.Values.Where(n => n.State == NoteState.Closed && DateTime.UtcNow - n.StateUtc > TimeSpan.FromDays(s.ClosedRetentionDays)).ToArray()) Library.Delete(n); Schedule(); } catch (Exception ex) { Log(ex.Message); } }
         private void PowerChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e) { if (e.Mode == Microsoft.Win32.PowerModes.Resume) Application.Current.Dispatcher.BeginInvoke(new Action(Tick)); }
+        public static List<string> ApplySteps(IEnumerable<KeyValuePair<string, Action>> steps)
+        {
+            var errors = new List<string>();
+            foreach (var step in steps) { try { step.Value(); } catch (Exception ex) { errors.Add(Ui.Text(step.Key) + ": " + ex.Message); } }
+            return errors;
+        }
         public void ApplySettings()
         {
-            if (testMode) return;
+            var errors = ApplySettingsReport();
+            if (errors.Count > 0) Ui.Error(new InvalidOperationException(string.Join("\n", errors)));
+        }
+        public List<string> ApplySettingsReport()
+        {
+            var errors = new List<string>();
+            if (testMode) return errors;
             var s = Library.Catalog.Settings;
             bool languageChanged = !string.Equals(appliedLanguage, s.Language ?? "", StringComparison.OrdinalIgnoreCase);
-            Ui.LoadLanguage(s.Language); appliedLanguage = Ui.CurrentLanguage;
+            bool languageLoaded = false;
+            try { Ui.LoadLanguage(s.Language); languageLoaded = true; } catch (Exception ex) { errors.Add(Ui.Text("语言") + ": " + ex.Message); }
             Native.UnregisterHotKey(source.Handle, 1); Native.UnregisterHotKey(source.Handle, 2); Native.UnregisterHotKey(source.Handle, 3);
-            if (!Native.RegisterHotkey(source.Handle, 1, s.GlobalNewKey) || !Native.RegisterHotkey(source.Handle, 2, s.GlobalToggleKey) || !Native.RegisterHotkey(source.Handle, 3, s.GlobalManageKey)) Ui.Error(new InvalidOperationException(Ui.Text("全局快捷键被其他应用占用，请在设置中修改。")));
+            var keys = new[] { s.GlobalNewKey, s.GlobalToggleKey, s.GlobalManageKey };
+            var names = new[] { "新建便签", "显示 / 隐藏便签", "管理便签…" };
+            errors.AddRange(ApplySteps(keys.Select((key, index) => new KeyValuePair<string, Action>(names[index], () =>
+            {
+                if (!Native.RegisterHotkey(source.Handle, index + 1, key)) throw new InvalidOperationException(Ui.Text("全局快捷键被其他应用占用，请在设置中修改。"));
+            }))));
             if (listener != null) { listener.Stop(); listener = null; }
-            if (s.Networking) { try { listener = new TcpListener(IPAddress.Any, s.NetworkPort); listener.Start(); var current = listener; Task.Run(() => ReceiveLoop(current)); } catch (Exception ex) { Ui.Error(ex); } }
-            if (winHook != IntPtr.Zero) { Native.UnhookWinEvent(winHook); winHook = IntPtr.Zero; }
-            if (Library.Notes.Values.Any(n => n.Attachment != null)) EnsureAttachmentHook();
-            if (languageChanged) RefreshLanguageSurfaces(); else { foreach (var w in Windows.Values) w.RefreshAppearance(); foreach (var w in stacks.Values) w.Refresh(); }
+            if (s.Networking)
+            {
+                try { listener = new TcpListener(IPAddress.Any, s.NetworkPort); listener.Start(); var current = listener; Task.Run(() => ReceiveLoop(current)); }
+                catch (Exception ex) { if (listener != null) listener.Stop(); listener = null; errors.Add(Ui.Text("网络") + ": " + ex.Message); }
+            }
+            try
+            {
+                if (winHook != IntPtr.Zero) { Native.UnhookWinEvent(winHook); winHook = IntPtr.Zero; }
+                if (Library.Notes.Values.Any(n => n.Attachment != null)) EnsureAttachmentHook();
+                if (languageChanged && languageLoaded) { RefreshLanguageSurfaces(); appliedLanguage = Ui.CurrentLanguage; }
+                else { foreach (var w in Windows.Values) w.RefreshAppearance(); foreach (var w in stacks.Values) w.Refresh(); }
+            }
+            catch (Exception ex) { errors.Add(Ui.Text("界面与附着") + ": " + ex.Message); }
+            return errors;
         }
         private void RefreshLanguageSurfaces()
         {
@@ -349,12 +443,20 @@ namespace DeskPins.App
         private static System.Drawing.Icon LoadIcon() { using (var stream = typeof(AppHost).Assembly.GetManifestResourceStream("DeskPins.Icon.ico")) return new System.Drawing.Icon(stream); }
         private void BuildTray()
         {
-            tray = new System.Windows.Forms.NotifyIcon { Text = hidden ? "DeskPins · " + Ui.Text("便签已隐藏") : "DeskPins · " + Library.Notes.Count + " " + Ui.Text("张便签"), Icon = LoadIcon(), Visible = true }; tray.MouseClick += (s, e) => { if (e.Button == System.Windows.Forms.MouseButtons.Left) BringForward(); }; tray.MouseDoubleClick += (s, e) => { if (e.Button == System.Windows.Forms.MouseButtons.Left) New(); }; var menu = new System.Windows.Forms.ContextMenuStrip();
-            Action<string, Action> add = (text, action) => { var item = menu.Items.Add(Ui.Text(text)); item.Click += (s, e) => { try { action(); } catch (Exception ex) { Ui.Error(ex); } }; }; add("新建便签", () => New()); add("从剪贴板新建", () => New(null, true)); add("新建图片便签", () => New(NoteKind.Image)); add("从屏幕截取新建…", Capture); menu.Items.Add(new System.Windows.Forms.ToolStripSeparator()); add("显示 / 隐藏全部", ToggleAll); add("前置所有便签", BringForward); add("管理便签…", Manage); add("联系人…", Friends); add("设置…", Settings); menu.Items.Add(new System.Windows.Forms.ToolStripSeparator()); add("关于 DeskPins", () => new AboutWindow().ShowDialog()); add("退出", Exit); tray.ContextMenuStrip = menu;
+            tray = new System.Windows.Forms.NotifyIcon { Text = hidden ? "DeskPins · " + Ui.Text("便签已隐藏") : "DeskPins · " + Library.Notes.Count + " " + Ui.Text("张便签"), Icon = LoadIcon(), Visible = true }; tray.MouseClick += (s, e) => { if (e.Button == System.Windows.Forms.MouseButtons.Left) BringForward(); }; tray.MouseDoubleClick += (s, e) => { if (e.Button == System.Windows.Forms.MouseButtons.Left) New(); }; tray.ContextMenuStrip = BuildTrayMenu();
+        }
+        public System.Windows.Forms.ContextMenuStrip BuildTrayMenu()
+        {
+            var menu = new System.Windows.Forms.ContextMenuStrip();
+            Action<string, Action, string> add = (text, action, shortcut) => { var item = new System.Windows.Forms.ToolStripMenuItem(Ui.Text(text)) { ShortcutKeyDisplayString = shortcut }; menu.Items.Add(item); item.Click += (s, e) => { try { action(); } catch (Exception ex) { Ui.Error(ex); } }; };
+            add("新建便签", () => New(), Library.Catalog.Settings.GlobalNewKey); add("从剪贴板新建", () => New(null, true), ""); add("新建图片便签", () => New(NoteKind.Image), ""); add("从屏幕截取新建…", Capture, "");
+            menu.Items.Add(new System.Windows.Forms.ToolStripSeparator()); add("显示 / 隐藏全部", ToggleAll, Library.Catalog.Settings.GlobalToggleKey); add("前置所有便签", BringForward, ""); add("管理便签…", Manage, Library.Catalog.Settings.GlobalManageKey);
+            menu.Items.Add(new System.Windows.Forms.ToolStripSeparator()); add("联系人…", Friends, ShortcutFor("friends")); add("设置…", Settings, ShortcutFor("settings")); add("关于 DeskPins…", () => new AboutWindow().ShowDialog(), "");
+            menu.Items.Add(new System.Windows.Forms.ToolStripSeparator()); add("退出", Exit, ""); return menu;
         }
         public void Log(string message) { try { lock (logLock) File.AppendAllText(Path.Combine(Path.GetDirectoryName(Library.Repository.FilePath), "deskpins.log"), DateTime.UtcNow.ToString("o") + " " + message + Environment.NewLine); } catch (IOException) { } }
         private readonly object logLock = new object();
-        public void Exit() { if (Exiting) return; FlushAll(); Library.SaveCatalog(); Exiting = true; Dispose(); Application.Current.Shutdown(); }
-        public void Dispose() { if (disposed) return; disposed = true; Exiting = true; if (timer != null) timer.Dispose(); attachmentDebounce.Stop(); if (winHook != IntPtr.Zero) Native.UnhookWinEvent(winHook); Microsoft.Win32.SystemEvents.PowerModeChanged -= PowerChanged; if (listener != null) listener.Stop(); StopSound(); Api.Dispose(); if (manager != null) manager.Close(); if (settingsWindow != null) { settingsWindow.Close(); settingsWindow = null; } foreach (var w in Windows.Values.ToArray()) w.CloseInternal(); Windows.Clear(); foreach (var w in stacks.Values) w.Close(); stacks.Clear(); Native.UnregisterHotKey(source.Handle, 1); Native.UnregisterHotKey(source.Handle, 2); Native.UnregisterHotKey(source.Handle, 3); source.Dispose(); if (tray != null) { tray.Visible = false; tray.Dispose(); } Library.Dispose(); }
+        public void Exit() { if (storageFailed) { Dispose(); Application.Current.Shutdown(); return; } if (Exiting) return; FlushAll(); Library.SaveCatalog(); Exiting = true; Dispose(); Application.Current.Shutdown(); }
+        public void Dispose() { if (disposed) return; disposed = true; Exiting = true; if (timer != null) timer.Dispose(); attachmentDebounce.Stop(); if (winHook != IntPtr.Zero) Native.UnhookWinEvent(winHook); Microsoft.Win32.SystemEvents.PowerModeChanged -= PowerChanged; if (listener != null) listener.Stop(); StopSound(); Api.Dispose(); if (manager != null) manager.Close(); if (settingsWindow != null) { settingsWindow.Close(); settingsWindow = null; } foreach (var w in Windows.Values.ToArray()) w.CloseInternal(!storageFailed); Windows.Clear(); foreach (var w in stacks.Values) w.Close(); stacks.Clear(); Native.UnregisterHotKey(source.Handle, 1); Native.UnregisterHotKey(source.Handle, 2); Native.UnregisterHotKey(source.Handle, 3); source.Dispose(); if (tray != null) { tray.Visible = false; tray.Dispose(); } Library.Dispose(); }
     }
 }

@@ -32,7 +32,7 @@
 
 > 一句话区分：**ROADMAP = 计划与完成度**；**HANDOFF = 还在路上的活**；**CHANGELOG = 发布变更记录**。同一内容不在三处重复存放。
 > **`docs/` vs `ARCHITECTURE.md`**：前者给**人**看（怎么用 / 为什么 / 有什么坑）；后者给 **AI** 看（代码在哪 / 怎么连）。每类信息的去处见 §5.0。
-> **技能**（只在用户明确要求时使用，不自动触发；详见 `.claude/skills/<name>/SKILL.md`）：`doc-record`（「记进 docs」：把结论沉淀进 `docs/`）· `doc-audit`（「审一下文档」：查文档与代码的漂移）· `init-docs`（「初始化文档」：AI-INIT 没被执行时的手动入口）。
+> **技能**（只在用户明确要求时使用，不自动触发；详见 `.claude/skills/<name>/SKILL.md`）：`doc-record`（「记进 docs」：把结论沉淀进 `docs/`）· `doc-audit`（「审一下文档」：查文档与代码的漂移）· `init-docs`（「初始化文档」：AI-INIT 没被执行时的手动入口）· `release`（`/release X.Y.Z`：版本、提交推送、打包并上传 GitHub Release）。
 
 ### 入口加载约定
 

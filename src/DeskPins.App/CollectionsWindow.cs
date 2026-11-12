@@ -1,7 +1,11 @@
 using System;
 using System.Linq;
+using System.Globalization;
+using System.Net;
+using System.Net.Mail;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using DeskPins.Core;
 
 namespace DeskPins.App
@@ -10,27 +14,181 @@ namespace DeskPins.App
     {
         public CollectionsWindow(AppHost host, string type)
         {
-            Title = type == "friends" ? Ui.Text("联系人") : type == "folders" ? Ui.Text("收藏文件夹") : Ui.Text("标签"); Width = 630; Height = 500; WindowStartupLocation = WindowStartupLocation.CenterScreen; ShowInTaskbar = false;
-            Ui.FitDialog(this, 460, 320);
-            var root = new DockPanel { Margin = new Thickness(12) }; var buttons = new WrapPanel(); DockPanel.SetDock(buttons, Dock.Bottom); root.Children.Add(buttons); var list = new ListBox { DisplayMemberPath = "Name" }; root.Children.Add(list);
-            Action refresh = () => { var selected = list.SelectedItem; list.ItemsSource = null; list.ItemsSource = type == "friends" ? (System.Collections.IEnumerable)host.Library.Catalog.Friends : type == "folders" ? host.Library.Catalog.Folders : (System.Collections.IEnumerable)host.Library.Catalog.Tags; list.SelectedItem = selected; };
+            Title = Ui.Text(type == "friends" ? "联系人" : type == "folders" ? "收藏文件夹" : "标签");
+            Width = 680; Height = 520; WindowStartupLocation = WindowStartupLocation.CenterScreen; ShowInTaskbar = false;
+            UiTheme.Apply(this); Ui.FitDialog(this, 460, 320);
+            var panel = new DockPanel();
+            var header = new StackPanel { Margin = new Thickness(0, 0, 0, 12) }; DockPanel.SetDock(header, Dock.Top); panel.Children.Add(header);
+            header.Children.Add(new TextBlock { Text = Title, FontSize = 18, FontWeight = FontWeights.SemiBold });
+            header.Children.Add(new TextBlock { Text = Ui.Text("选择项目后编辑；删除项目不会删除便签内容。"), Foreground = UiTheme.Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) });
+            var tools = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) }; DockPanel.SetDock(tools, Dock.Top); panel.Children.Add(tools);
+            var dangerTools = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) }; DockPanel.SetDock(dangerTools, Dock.Bottom); panel.Children.Add(dangerTools);
+            var list = new ListBox { ItemTemplate = CollectionEditor.NameTemplate(), MinHeight = 180, Height = 280 };
+            System.Windows.Automation.AutomationProperties.SetName(list, Title);
+            panel.Children.Add(list);
+            Action<object> refresh = selected =>
+            {
+                list.ItemsSource = null;
+                list.ItemsSource = type == "friends" ? (System.Collections.IEnumerable)host.Library.Catalog.Friends : type == "folders" ? host.Library.Catalog.Folders : (System.Collections.IEnumerable)host.Library.Catalog.Tags;
+                list.SelectedItem = selected; if (list.SelectedItem != null) list.ScrollIntoView(list.SelectedItem);
+            };
             Action<object> edit = item =>
             {
-                if (type == "friends")
+                object edited;
+                try
                 {
-                    var f = item as Friend ?? new Friend(); var name = Ui.Ask("联系人", "名称", f.Name); if (name == null) return; var address = Ui.Ask("联系人", "主机地址（可含 :端口；留空使用邮件）", f.Address); if (address == null) return; var email = Ui.Ask("联系人", "邮件地址", f.Email); if (email == null) return; var group = Ui.Ask("联系人", "组路径（例如 团队/开发）", f.Group); if (group == null) return; var favorite = Ui.Ask("联系人", "快捷发送序号 1–10（0=无）", f.Favorite.ToString()); if (favorite == null) return; f.Name = name; f.Address = address; f.Email = email; f.Group = group; f.Favorite = Math.Max(0, Math.Min(10, (int)Ui.Number(favorite, 0))); if (item == null) host.Library.Catalog.Friends.Add(f);
+                    if (type == "friends")
+                    {
+                        var draft = EditFriend(item as Friend); if (draft == null) return;
+                        edited = item ?? draft;
+                        host.Library.Atomic(() =>
+                        {
+                            if (item == null) host.Library.Catalog.Friends.Add(draft);
+                            else { var friend = (Friend)item; friend.Name = draft.Name; friend.Address = draft.Address; friend.Email = draft.Email; friend.Group = draft.Group; friend.Favorite = draft.Favorite; }
+                            host.Library.SaveCatalog();
+                        });
+                    }
+                    else
+                    {
+                        edited = item == null ? (type == "folders" ? (object)new Folder() : new Tag()) : item is Folder folder ? (object)Json.Read<Folder>(Json.Bytes(folder)) : Json.Read<Tag>(Json.Bytes((Tag)item));
+                        if (!CollectionEditor.Edit(this, host, edited, type)) return;
+                        var draft = edited;
+                        host.Library.Atomic(() =>
+                        {
+                            if (type == "folders")
+                            {
+                                var f = (Folder)draft;
+                                if (item == null) host.Library.Catalog.Folders.Add(f);
+                                else { var original = (Folder)item; original.Name = f.Name; original.ParentId = f.ParentId; }
+                            }
+                            else
+                            {
+                                var t = (Tag)draft;
+                                if (item == null) host.Library.Catalog.Tags.Add(t);
+                                else { var original = (Tag)item; original.Name = t.Name; original.Color = t.Color; }
+                            }
+                            host.Library.SaveCatalog();
+                        });
+                        if (item != null) edited = item;
+                    }
+                    refresh(edited); list.Focus();
                 }
-                else if (type == "folders")
-                {
-                    var f = item as Folder ?? new Folder(); var dialog = new Window { Title = Ui.Text("收藏文件夹"), Width = 420, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterScreen, ShowInTaskbar = false, ResizeMode = ResizeMode.NoResize }; var panel = new StackPanel { Margin = new Thickness(16) }; var name = new TextBox { Text = f.Name }; Ui.Field(panel, "名称", name); var roots = new[] { new Folder { Id = "", Name = "根目录" } }.Concat(host.Library.Catalog.Folders.Where(x => x.Id != f.Id)).ToList(); var parent = new ComboBox { ItemsSource = roots, DisplayMemberPath = "Name", SelectedItem = roots.FirstOrDefault(x => x.Id == f.ParentId) ?? roots[0] }; Ui.Field(panel, "父文件夹", parent); panel.Children.Add(Ui.Button("保存", () => { var selected = (Folder)parent.SelectedItem; var current = selected.Id; for (int i = 0; i <= host.Library.Catalog.Folders.Count && current != ""; i++) { if (current == f.Id) { MessageBox.Show(Ui.Text("文件夹不能循环嵌套。")); return; } current = host.Library.Catalog.Folders.First(x => x.Id == current).ParentId; } f.Name = name.Text; f.ParentId = selected.Id; dialog.DialogResult = true; })); dialog.Content = panel; if (dialog.ShowDialog() != true) return; if (item == null) host.Library.Catalog.Folders.Add(f);
-                }
-                else { var t = item as Tag ?? new Tag(); var name = Ui.Ask("标签", "名称", t.Name); if (name == null) return; var color = Ui.Color(t.Color); if (color == null) return; t.Name = name; t.Color = color; if (item == null) host.Library.Catalog.Tags.Add(t); }
-                host.Library.SaveCatalog(); refresh();
+                catch (Exception ex) { refresh(null); Ui.Error(ex, this); }
             };
-            buttons.Children.Add(Ui.Button("新建", () => { try { edit(null); } catch (Exception ex) { Ui.Error(ex); } })); buttons.Children.Add(Ui.Button("编辑", () => { if (list.SelectedItem != null) edit(list.SelectedItem); })); buttons.Children.Add(Ui.Button("删除", () => { if (list.SelectedItem == null || !Ui.Confirm("删除选中项？便签内容会保留。")) return; if (type == "friends") host.Library.Catalog.Friends.Remove((Friend)list.SelectedItem); else if (type == "folders") { var f = (Folder)list.SelectedItem; foreach (var n in host.Library.Notes.Values.Where(n => n.FolderId == f.Id).ToArray()) host.Library.Move(n, NoteState.Stored); foreach (var child in host.Library.Catalog.Folders.Where(x => x.ParentId == f.Id)) child.ParentId = f.ParentId; host.Library.Catalog.Folders.Remove(f); } else { var t = (Tag)list.SelectedItem; foreach (var n in host.Library.Notes.Values.Where(n => n.Tags.Contains(t.Id))) { n.Tags.Remove(t.Id); host.Library.Save(n); } host.Library.Catalog.Tags.Remove(t); } host.Library.SaveCatalog(); refresh(); }));
-            if (type == "folders") buttons.Children.Add(Ui.Button("切换加密", () => { var f = list.SelectedItem as Folder; if (f == null) return; host.EnsureUnlocked(new Folder { Encrypted = true }); host.Library.SetFolderEncrypted(f, !f.Encrypted); refresh(); }));
-            if (type == "friends") { buttons.Children.Add(Ui.Button("新建分隔线", () => { host.Library.Catalog.Friends.Add(new Friend { Name = "────────", Separator = true }); host.Library.SaveCatalog(); refresh(); })); buttons.Children.Add(Ui.Button("同步联系人", () => host.SyncFriends())); buttons.Children.Add(Ui.Button("上移", () => { var f = list.SelectedItem as Friend; if (f == null) return; int i = host.Library.Catalog.Friends.IndexOf(f); if (i > 0) { host.Library.Catalog.Friends.RemoveAt(i); host.Library.Catalog.Friends.Insert(i - 1, f); host.Library.SaveCatalog(); refresh(); list.SelectedItem = f; } })); }
-            var close = Ui.Button("关闭", () => Close()); close.IsCancel = true; buttons.Children.Add(close); list.MouseDoubleClick += (s, e) => { if (list.SelectedItem != null) edit(list.SelectedItem); }; refresh(); Content = root;
+            var create = Ui.PrimaryButton("新建…", () => edit(null)); tools.Children.Add(create);
+            var editButton = Ui.Button("编辑…", () => { if (list.SelectedItem != null) edit(list.SelectedItem); }); tools.Children.Add(editButton);
+            var delete = Ui.DangerButton("删除", () =>
+            {
+                var selected = list.SelectedItem; if (selected == null || !Ui.Confirm("删除选中项？便签内容会保留。", this)) return;
+                int index = list.SelectedIndex;
+                try
+                {
+                    host.Library.Atomic(() =>
+                    {
+                        if (type == "friends") host.Library.Catalog.Friends.Remove((Friend)selected);
+                        else if (type == "folders")
+                        {
+                            var f = (Folder)selected;
+                            foreach (var n in host.Library.Notes.Values.Where(n => n.FolderId == f.Id).ToArray()) host.Library.Move(n, NoteState.Stored);
+                            foreach (var child in host.Library.Catalog.Folders.Where(x => x.ParentId == f.Id)) child.ParentId = f.ParentId;
+                            host.Library.Catalog.Folders.Remove(f);
+                        }
+                        else
+                        {
+                            var t = (Tag)selected;
+                            foreach (var n in host.Library.Notes.Values.Where(n => n.Tags.Contains(t.Id))) { n.Tags.Remove(t.Id); host.Library.Save(n); }
+                            host.Library.Catalog.Tags.Remove(t);
+                        }
+                        host.Library.SaveCatalog();
+                    });
+                    refresh(null); if (list.Items.Count > 0) list.SelectedIndex = Math.Min(index, list.Items.Count - 1); list.Focus();
+                }
+                catch (Exception ex) { refresh(null); Ui.Error(ex, this); }
+            }); dangerTools.Children.Add(delete);
+            Button encryption = null, up = null;
+            if (type == "folders")
+            {
+                encryption = Ui.Button("切换加密", () =>
+                {
+                    var f = list.SelectedItem as Folder; if (f == null) return;
+                    try { host.EnsureUnlocked(new Folder { Encrypted = true }); host.Library.SetFolderEncrypted(f, !f.Encrypted); refresh(f); list.Focus(); }
+                    catch (Exception ex) { refresh(null); Ui.Error(ex, this); }
+                }); tools.Children.Add(encryption);
+            }
+            if (type == "friends")
+            {
+                tools.Children.Add(Ui.Button("新建分隔线", () => { var f = new Friend { Name = "────────", Separator = true }; host.Library.Atomic(() => { host.Library.Catalog.Friends.Add(f); host.Library.SaveCatalog(); }); refresh(f); list.Focus(); }));
+                tools.Children.Add(Ui.Button("同步联系人", () => { host.SyncFriends(); refresh(list.SelectedItem); }));
+                up = Ui.Button("上移", () =>
+                {
+                    var f = list.SelectedItem as Friend; if (f == null) return; int i = host.Library.Catalog.Friends.IndexOf(f); if (i <= 0) return;
+                    host.Library.Atomic(() => { host.Library.Catalog.Friends.RemoveAt(i); host.Library.Catalog.Friends.Insert(i - 1, f); host.Library.SaveCatalog(); }); refresh(f); list.Focus();
+                }); tools.Children.Add(up);
+            }
+            Action update = () =>
+            {
+                editButton.IsEnabled = delete.IsEnabled = list.SelectedItem != null;
+                if (encryption != null) encryption.IsEnabled = list.SelectedItem != null;
+                if (up != null) up.IsEnabled = list.SelectedIndex > 0;
+            };
+            list.SelectionChanged += (s, e) => update();
+            list.MouseDoubleClick += (s, e) => { if (list.SelectedItem != null) edit(list.SelectedItem); };
+            list.KeyDown += (s, e) => { if ((e.Key == Key.Enter || e.Key == Key.F2) && list.SelectedItem != null) { e.Handled = true; edit(list.SelectedItem); } };
+            var close = Ui.Button("关闭", Close); close.IsCancel = true;
+            Ui.DialogContent(this, panel, close); refresh(null); update();
+            Loaded += (s, e) => Dispatcher.BeginInvoke(new Action(() => list.Focus()), System.Windows.Threading.DispatcherPriority.Input);
+        }
+
+        private Friend EditFriend(Friend original)
+        {
+            var draft = original == null ? new Friend() : Json.Read<Friend>(Json.Bytes(original));
+            var dialog = new Window { Owner = this, Title = Ui.Text(original == null ? "新建联系人" : "编辑联系人"), Width = 480, SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            UiTheme.Apply(dialog); Ui.FitDialog(dialog, 400, 0);
+            var panel = new StackPanel();
+            panel.Children.Add(new TextBlock { Text = dialog.Title, FontSize = 18, FontWeight = FontWeights.SemiBold, Margin = new Thickness(2, 0, 2, 6) });
+            panel.Children.Add(new TextBlock { Text = Ui.Text(draft.Separator ? "此项目是联系人菜单分隔线。" : "填写主机地址或邮件地址；同时填写时优先使用主机地址。"), Foreground = UiTheme.Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 0, 2, 6) });
+            var name = new TextBox { Text = draft.Name }; var address = new TextBox { Text = draft.Address }; var email = new TextBox { Text = draft.Email }; var group = new TextBox { Text = draft.Group }; var favorite = new TextBox { Text = draft.Favorite.ToString(CultureInfo.CurrentCulture) };
+            Ui.Field(panel, "名称", name);
+            if (!draft.Separator)
+            {
+                Ui.Field(panel, "主机地址（可含 :端口；留空使用邮件）", address);
+                Ui.Field(panel, "邮件地址", email); Ui.Field(panel, "组路径（例如 团队/开发）", group); Ui.Field(panel, "快捷发送序号 1–10（0=无）", favorite);
+            }
+            var save = Ui.PrimaryButton("保存", () =>
+            {
+                var n = (name.Text ?? "").Trim(); var a = (address.Text ?? "").Trim(); var mail = (email.Text ?? "").Trim(); int order = draft.Favorite;
+                if (n.Length == 0) { CollectionEditor.ValidationError(dialog, name, "名称不能为空。"); return; }
+                if (!draft.Separator)
+                {
+                    if (a.Length == 0 && mail.Length == 0) { CollectionEditor.ValidationError(dialog, address, "请填写主机地址或邮件地址。"); return; }
+                    if (a.Length > 0 && !ValidAddress(a)) { CollectionEditor.ValidationError(dialog, address, "请输入有效主机地址；端口需为 1–65535 的整数。"); return; }
+                    if (mail.Length > 0)
+                    {
+                        try { var parsed = new MailAddress(mail); if (!string.Equals(parsed.Address, mail, StringComparison.OrdinalIgnoreCase) || !mail.Contains("@")) throw new FormatException(); }
+                        catch (FormatException) { CollectionEditor.ValidationError(dialog, email, "请输入有效邮件地址。"); return; }
+                    }
+                    if (!int.TryParse(favorite.Text, NumberStyles.Integer, CultureInfo.CurrentCulture, out order) || order < 0 || order > 10) { CollectionEditor.ValidationError(dialog, favorite, "快捷发送序号需为 0–10 的整数。"); return; }
+                }
+                draft.Name = n; draft.Address = a; draft.Email = mail; draft.Group = (group.Text ?? "").Trim(); draft.Favorite = order; dialog.DialogResult = true;
+            }); save.IsDefault = true;
+            var cancel = Ui.Button("取消", dialog.Close); cancel.IsCancel = true;
+            Ui.DialogContent(dialog, panel, save, cancel);
+            dialog.Loaded += (s, e) => dialog.Dispatcher.BeginInvoke(new Action(() => { name.Focus(); name.SelectAll(); }), System.Windows.Threading.DispatcherPriority.Input);
+            return dialog.ShowDialog() == true ? draft : null;
+        }
+
+        private static bool ValidAddress(string address)
+        {
+            if (address.Any(char.IsWhiteSpace) || address.IndexOfAny(new[] { '/', '\\', '@', ';', '[', ']' }) >= 0) return false;
+            IPAddress ip; if (IPAddress.TryParse(address, out ip)) return true;
+            string host = address; int colon = address.LastIndexOf(':');
+            if (colon >= 0)
+            {
+                if (colon == 0 || colon != address.IndexOf(':')) return false;
+                int port; if (!int.TryParse(address.Substring(colon + 1), NumberStyles.None, CultureInfo.InvariantCulture, out port) || port < 1 || port > 65535) return false;
+                host = address.Substring(0, colon);
+            }
+            return Uri.CheckHostName(host) != UriHostNameType.Unknown;
         }
     }
     public sealed class StackWindow : Window

@@ -22,10 +22,11 @@ namespace DeskPins.App
         {
             if (buildingTree) return;
             var node = tree.SelectedItem as TreeViewItem;
-            outlineProperties.IsEnabled = outlineDelete.IsEnabled = node != null;
+            outlineProperties.IsEnabled = outlineDelete.IsEnabled = node != null && !(node.Tag is string);
             if (node == null) return;
             SaveEditor();
-            if (node.Tag is Folder folder) folderFilter = folder.Id;
+            if (node.Tag is string) folderFilter = stackFilter = tagFilter = "";
+            else if (node.Tag is Folder folder) folderFilter = folder.Id;
             else if (node.Tag is NoteStack stack) stackFilter = stack.Id;
             else if (node.Tag is Tag tag) tagFilter = tag.Id;
             BuildTree(); Refresh();
@@ -39,7 +40,7 @@ namespace DeskPins.App
             if (category == 8 && !host.Library.Catalog.Folders.Any(f => f.Id == folderFilter)) folderFilter = "";
             if (category == 2 && !host.Library.Catalog.Stacks.Any(s => s.Id == stackFilter)) stackFilter = "";
             if (category == 9 && !host.Library.Catalog.Tags.Any(t => t.Id == tagFilter)) tagFilter = "";
-            var snapshot = category + "|" + folderFilter + "|" + stackFilter + "|" + tagFilter + "|" +
+            var snapshot = category + "|" + folderFilter + "|" + stackFilter + "|" + tagFilter + "|" + host.Library.Notes.Count + "|" + host.Library.Notes.Values.Count(n => n.State == NoteState.Stored) + "|" + host.Library.Notes.Values.Count(n => n.StackId != "") + "|" + host.Library.Notes.Values.Count(n => n.Tags.Count > 0) + "|" +
                 Json.Text(host.Library.Catalog.Folders.Select(f => new[] { f.Id, f.Name, f.ParentId, f.Encrypted.ToString(), StoredCount(f.Id).ToString() }).ToArray()) +
                 Json.Text(host.Library.Catalog.Stacks.Select(s => new[] { s.Id, s.Name, s.Color, StackCount(s.Id).ToString() }).ToArray()) +
                 Json.Text(host.Library.Catalog.Tags.Select(t => new[] { t.Id, t.Name, t.Color, TagCount(t.Id).ToString() }).ToArray());
@@ -48,10 +49,14 @@ namespace DeskPins.App
             try
             {
                 tree.Items.Clear();
-                if (category == 8) foreach (var folder in host.Library.Catalog.Folders.Where(f => f.ParentId == "")) tree.Items.Add(FolderNode(folder, new HashSet<string>()));
-                else if (category == 2) foreach (var stack in host.Library.Catalog.Stacks) tree.Items.Add(CollectionNode(stack, railIcons[2], stack.Name, StackCount(stack.Id), Ui.Brush(stack.Color)));
-                else foreach (var tag in host.Library.Catalog.Tags) tree.Items.Add(CollectionNode(tag, railIcons[9], tag.Name, TagCount(tag.Id), Ui.Brush(tag.Color)));
+                var allNode = new TreeViewItem { Header = NodeHeader("", Ui.Text("全部"), category == 8 ? host.Library.Notes.Values.Count(n => n.State == NoteState.Stored) : category == 2 ? host.Library.Notes.Values.Count(n => n.StackId != "") : host.Library.Notes.Values.Count(n => n.Tags.Count > 0)), Tag = "all", Style = OutlineTreeStyle(), HorizontalContentAlignment = HorizontalAlignment.Stretch, HorizontalAlignment = HorizontalAlignment.Stretch };
+                tree.Items.Add(allNode);
+                if ((category == 8 && folderFilter == "") || (category == 2 && stackFilter == "") || (category == 9 && tagFilter == "")) allNode.IsSelected = true;
+                if (category == 8) foreach (var folder in host.Library.Catalog.Folders.Where(f => f.ParentId == "")) tree.Items.Add(FolderNode(folder, new HashSet<string>(), 0));
+                else if (category == 2) foreach (var stack in host.Library.Catalog.Stacks) tree.Items.Add(CollectionNode(stack, railIcons[2], stack.Name, StackCount(stack.Id), Ui.Brush(stack.Color), 0));
+                else foreach (var tag in host.Library.Catalog.Tags) tree.Items.Add(CollectionNode(tag, railIcons[9], tag.Name, TagCount(tag.Id), Ui.Brush(tag.Color), 0));
                 foreach (var node in Nodes(tree.Items)) if ((node.Tag as Folder)?.Id == folderFilter || (node.Tag as NoteStack)?.Id == stackFilter || (node.Tag as Tag)?.Id == tagFilter) { node.IsSelected = true; break; }
+                outlineProperties.IsEnabled = outlineDelete.IsEnabled = tree.SelectedItem is TreeViewItem selectedNode && !(selectedNode.Tag is string);
             }
             finally { buildingTree = false; }
         }
@@ -60,19 +65,19 @@ namespace DeskPins.App
         private int StackCount(string stackId) { return host.Library.Notes.Values.Count(n => n.StackId == stackId); }
         private int TagCount(string tagId) { return host.Library.Notes.Values.Count(n => n.Tags.Contains(tagId)); }
 
-        private TreeViewItem CollectionNode(object value, string glyph, string name, int count, Brush color = null)
+        private TreeViewItem CollectionNode(object value, string glyph, string name, int count, Brush color = null, int depth = 0)
         {
-            var node = new TreeViewItem { Header = NodeHeader(glyph, name, count, color), Tag = value, IsExpanded = true, HorizontalContentAlignment = HorizontalAlignment.Stretch, AllowDrop = true, ContextMenu = CollectionMenu(value) };
+            var node = new TreeViewItem { Header = NodeHeader(glyph, name, count, color), Tag = value, Style = OutlineTreeStyle(), IsExpanded = true, HorizontalContentAlignment = HorizontalAlignment.Stretch, HorizontalAlignment = HorizontalAlignment.Stretch, AllowDrop = true, ContextMenu = CollectionMenu(value), Padding = new Thickness(2 + depth * 18, 2, 2, 2) };
             WireNode(node);
             return node;
         }
 
-        private TreeViewItem FolderNode(Folder folder, HashSet<string> visited)
+        private TreeViewItem FolderNode(Folder folder, HashSet<string> visited, int depth)
         {
-            var node = new TreeViewItem { Header = NodeHeader(railIcons[8], (folder.Encrypted ? "🔒 " : "") + folder.Name, StoredCount(folder.Id)), Tag = folder, AllowDrop = true, IsExpanded = true, HorizontalContentAlignment = HorizontalAlignment.Stretch, ContextMenu = CollectionMenu(folder) };
+            var node = new TreeViewItem { Header = NodeHeader(railIcons[8], (folder.Encrypted ? Ui.Text("加密") + " · " : "") + folder.Name, StoredCount(folder.Id)), Tag = folder, Style = OutlineTreeStyle(), AllowDrop = true, IsExpanded = true, HorizontalContentAlignment = HorizontalAlignment.Stretch, HorizontalAlignment = HorizontalAlignment.Stretch, ContextMenu = CollectionMenu(folder), Padding = new Thickness(2 + depth * 18, 2, 2, 2) };
             WireNode(node);
             if (!visited.Add(folder.Id)) return node;
-            foreach (var child in host.Library.Catalog.Folders.Where(f => f.ParentId == folder.Id)) node.Items.Add(FolderNode(child, visited));
+            foreach (var child in host.Library.Catalog.Folders.Where(f => f.ParentId == folder.Id)) node.Items.Add(FolderNode(child, visited, depth + 1));
             return node;
         }
 
@@ -85,15 +90,15 @@ namespace DeskPins.App
 
         private static Grid NodeHeader(string glyph, string name, int count, Brush color = null)
         {
-            var panel = new Grid { MinWidth = 160, HorizontalAlignment = HorizontalAlignment.Stretch };
-            panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
+            var panel = new Grid { MinWidth = 100, HorizontalAlignment = HorizontalAlignment.Stretch };
+            panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
             panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             panel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var icon = new TextBlock { Text = glyph, FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 14, Foreground = color ?? Ui.Brush("#1268B3"), VerticalAlignment = VerticalAlignment.Center };
+            var icon = new TextBlock { Text = glyph, FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 14, Foreground = color ?? UiTheme.Accent, VerticalAlignment = VerticalAlignment.Center };
             panel.Children.Add(icon);
-            var label = new TextBlock { Text = name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+            var label = new TextBlock { Text = name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = name };
             Grid.SetColumn(label, 1); panel.Children.Add(label);
-            var countBlock = new TextBlock { Text = count.ToString(), Foreground = Ui.Brush("#111827"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
+            var countBlock = new TextBlock { Text = count.ToString(), Foreground = UiTheme.Muted, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
             Grid.SetColumn(countBlock, 2); panel.Children.Add(countBlock);
             return panel;
         }
@@ -119,12 +124,12 @@ namespace DeskPins.App
             if (item is Folder folder)
             {
                 menu.Items.Add(Ui.Item("新建子文件夹", () => CreateCollectionItem("folders", folder)));
-                menu.Items.Add(Ui.Item("切换加密", () => ToggleFolderEncryption(folder)));
+                menu.Items.Add(Ui.Item("加密文件夹", () => ToggleFolderEncryption(folder), check: folder.Encrypted));
             }
             else if (item is NoteStack) menu.Items.Add(Ui.Item("新建堆叠", () => CreateCollectionItem("stacks", null)));
             else if (item is Tag) menu.Items.Add(Ui.Item("新建标签", () => CreateCollectionItem("tags", null)));
             menu.Items.Add(new Separator());
-            menu.Items.Add(Ui.Item("重命名…", () => EditCollection(item)));
+            menu.Items.Add(Ui.Item("重命名…", () => BeginInlineCollectionRename(item), "F2"));
             menu.Items.Add(Ui.Item("属性…", () => EditCollection(item)));
             menu.Items.Add(Ui.Item("删除", () => DeleteCollection(item)));
             return menu;
@@ -149,10 +154,43 @@ namespace DeskPins.App
             BuildTree(); Refresh();
         }
 
+        private void BeginInlineCollectionRename(object item = null)
+        {
+            var node = item == null ? tree.SelectedItem as TreeViewItem : Nodes(tree.Items).FirstOrDefault(n => ReferenceEquals(n.Tag, item));
+            if (node == null || node.Tag is string || node.Header is TextBox) return;
+            item = node.Tag;
+            string original = item is Folder folder ? folder.Name : item is NoteStack stack ? stack.Name : item is Tag tag ? tag.Name : null;
+            if (original == null) return;
+            var header = node.Header;
+            var box = new TextBox { Text = original, MinWidth = 100, BorderBrush = UiTheme.Accent, Padding = new Thickness(3, 2, 3, 2) };
+            bool finished = false;
+            Action<bool> finish = commit =>
+            {
+                if (finished) return;
+                try
+                {
+                    if (commit)
+                    {
+                        string name = (box.Text ?? "").Trim();
+                        if (name.Length == 0) throw new InvalidOperationException(Ui.Text("名称不能为空。"));
+                        Action<string> set = value => { if (item is Folder f) f.Name = value; else if (item is NoteStack s) s.Name = value; else if (item is Tag t) t.Name = value; };
+                        set(name);
+                        try { host.Library.SaveCatalog(); } catch { set(original); throw; }
+                    }
+                    finished = true; node.Header = header; navigationSnapshot = ""; BuildTree(); Refresh();
+                }
+                catch (Exception ex) { Ui.Error(ex, this); box.Focus(); }
+            };
+            box.KeyDown += (s, e) => { if (e.Key == Key.Enter) { finish(true); e.Handled = true; } else if (e.Key == Key.Escape) { finish(false); e.Handled = true; } };
+            box.LostFocus += (s, e) => finish(true);
+            box.Loaded += (s, e) => box.Dispatcher.BeginInvoke(new Action(() => { box.Focus(); box.SelectAll(); }), System.Windows.Threading.DispatcherPriority.Input);
+            node.Header = box;
+        }
+
         private void EditSelectedCollection()
         {
             try { var node = tree.SelectedItem as TreeViewItem; if (node != null) EditCollection(node.Tag); }
-            catch (Exception ex) { Ui.Error(ex); }
+            catch (Exception ex) { Ui.Error(ex, this); }
         }
 
         private void EditCollection(object item)
@@ -177,7 +215,7 @@ namespace DeskPins.App
             {
                 if (item is Folder folder)
                 {
-                    if (!Ui.Confirm(string.Format(Ui.Text("删除文件夹“{0}”？其中的便签会移回已收藏。"), folder.Name))) return;
+                    if (!Ui.Confirm(string.Format(Ui.Text("删除文件夹“{0}”？其中的便签会移回已收藏。"), folder.Name), this)) return;
                     if (folder.Encrypted) host.EnsureUnlocked(folder);
                     host.Library.Atomic(() =>
                     {
@@ -190,7 +228,7 @@ namespace DeskPins.App
                 }
                 else if (item is NoteStack stack)
                 {
-                    if (!Ui.Confirm(string.Format(Ui.Text("删除堆叠“{0}”？便签会保留并移出堆叠。"), stack.Name))) return;
+                    if (!Ui.Confirm(string.Format(Ui.Text("删除堆叠“{0}”？便签会保留并移出堆叠。"), stack.Name), this)) return;
                     host.Library.Atomic(() =>
                     {
                         foreach (var n in host.Library.Notes.Values.Where(n => n.StackId == stack.Id).ToArray()) { n.StackId = ""; host.Library.Save(n); }
@@ -201,7 +239,7 @@ namespace DeskPins.App
                 }
                 else if (item is Tag tag)
                 {
-                    if (!Ui.Confirm(string.Format(Ui.Text("删除标签“{0}”？便签内容会保留。"), tag.Name))) return;
+                    if (!Ui.Confirm(string.Format(Ui.Text("删除标签“{0}”？便签内容会保留。"), tag.Name), this)) return;
                     host.Library.Atomic(() =>
                     {
                         foreach (var n in host.Library.Notes.Values.Where(n => n.Tags.Contains(tag.Id)).ToArray()) { n.Tags.Remove(tag.Id); host.Library.Save(n); }
@@ -213,7 +251,7 @@ namespace DeskPins.App
                 else return;
                 BuildTree(); Refresh();
             }
-            catch (Exception ex) { Ui.Error(ex); }
+            catch (Exception ex) { Ui.Error(ex, this); }
         }
 
         private void ToggleFolderEncryption(Folder folder)
@@ -225,10 +263,10 @@ namespace DeskPins.App
                 host.Library.SaveCatalog();
                 BuildTree(); Refresh();
             }
-            catch (Exception ex) { Ui.Error(ex); }
+            catch (Exception ex) { Ui.Error(ex, this); }
         }
 
-        private void NewNoteForSelection() { try { NewNoteIn(tree.SelectedItem is TreeViewItem node ? node.Tag : null); } catch (Exception ex) { Ui.Error(ex); } }
+        private void NewNoteForSelection() { try { NewNoteIn(tree.SelectedItem is TreeViewItem node ? node.Tag : null); } catch (Exception ex) { Ui.Error(ex, this); } }
 
         private void NewNoteIn(object item)
         {
@@ -265,13 +303,14 @@ namespace DeskPins.App
             e.Handled = true;
             try
             {
-                SaveEditor();
                 var targets = ((string[])e.Data.GetData("DeskPins.Notes")).Where(host.Library.Notes.ContainsKey).Select(id => host.Library.Notes[id]).ToArray();
+                if (targets.Length == 0 || (state == NoteState.Closed && !ConfirmClose(targets.Length))) return;
+                SaveEditor();
                 foreach (var n in targets) host.FlushNote(n);
                 host.Library.Atomic(() => { foreach (var n in targets) host.Library.Move(n, state, folder); });
                 Refresh();
             }
-            catch (Exception ex) { Ui.Error(ex); }
+            catch (Exception ex) { Ui.Error(ex, this); }
         }
 
         private void TreeMouseDown(object sender, MouseButtonEventArgs e)
@@ -339,7 +378,7 @@ namespace DeskPins.App
             var folder = node.Tag as Folder; if (folder == null) return;
             e.Handled = true;
             try { host.EnsureUnlocked(folder); DropTo(e, NoteState.Stored, folder.Id); }
-            catch (Exception ex) { Ui.Error(ex); }
+            catch (Exception ex) { Ui.Error(ex, this); }
         }
 
         private static int ZoneForNode(TreeViewItem node, DragEventArgs e)
@@ -426,7 +465,7 @@ namespace DeskPins.App
             if (ReferenceEquals(highlightedNode, node)) return;
             ClearHighlight();
             highlightedNode = node;
-            node.Background = Ui.Brush("#EAF3FB");
+            node.Background = UiTheme.Selected;
         }
 
         private void ClearHighlight()

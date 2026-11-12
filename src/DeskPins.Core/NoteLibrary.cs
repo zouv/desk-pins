@@ -17,7 +17,14 @@ namespace DeskPins.Core
         public event Action<Note> Woke;
         private bool inTransaction;
         public NoteLibrary(string path) { Repository = new NoteRepository(path); try { Reload(); } catch { Repository.Dispose(); throw; } }
-        public void Reload() { Catalog = Repository.LoadCatalog(); SessionPassword = null; Notes.Clear(); foreach (var n in Repository.LoadMetadata()) Notes.Add(n.Id, n); Notify(); }
+        public void Reload()
+        {
+            var catalog = Repository.LoadCatalog();
+            var notes = Repository.LoadMetadata().ToDictionary(n => n.Id);
+            Catalog = catalog; SessionPassword = null; Notes.Clear();
+            foreach (var pair in notes) Notes.Add(pair.Key, pair.Value);
+            Notify();
+        }
         public Note Create(NoteKind kind = NoteKind.Text) { var n = new Note { Kind = kind, Body = new byte[0], PlainText = "" }; Catalog.Settings.Styles[0].Apply(n); n.WakeTopmost = Catalog.Settings.WakeTopmostMode == "off" ? false : Catalog.Settings.WakeTopmostMode == "on" ? true : n.Topmost; n.WakeAlarm = Catalog.Settings.WakeAlarm; n.WakeSound = Catalog.Settings.WakeSoundEnabled; n.Left += Notes.Count % 8 * 22; n.Top += Notes.Count % 8 * 22; Notes.Add(n.Id, n); Save(n); return n; }
         public void Add(Note n) { if (Notes.ContainsKey(n.Id)) n.Id = Guid.NewGuid().ToString("N"); Notes.Add(n.Id, n); Save(n); }
         public Note Copy(Note n) { Load(n); var c = n.Clone(); c.Left += 20; c.Top += 20; c.State = NoteState.Desktop; c.StackId = ""; c.Attachment = null; c.Repeat = null; c.WakeUtc = null; c.AlarmUtc = null; c.Encrypted = false; Notes.Add(c.Id, c); Save(c); return c; }

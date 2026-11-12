@@ -28,7 +28,7 @@ namespace DeskPins.Tests
             string dir = Path.Combine(Path.GetTempPath(), "DeskPins-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(dir);
             try
             {
-                Schedules(); Encryption(); Storage(dir); EncryptedEdits(dir); OriginalImport(dir); Packets(); ResizeGeometry(); if (args.Contains("--ui")) UiTests(dir);
+                Schedules(); Encryption(); Storage(dir); EncryptedEdits(dir); OriginalImport(dir); Packets(); ResizeGeometry(); if (args.Contains("--ui")) { UiTests(dir); }
                 Console.WriteLine(checks + " checks passed."); return 0;
             }
             catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
@@ -142,7 +142,7 @@ namespace DeskPins.Tests
         private static void UiTests(string dir)
         {
             System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
-            var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown }; var visual = new System.Windows.Media.DrawingVisual(); using (var dc = visual.RenderOpen()) dc.DrawRectangle(System.Windows.Media.Brushes.Yellow, null, new Rect(0, 0, 10, 10)); var target = new System.Windows.Media.Imaging.RenderTargetBitmap(10, 10, 96, 96, System.Windows.Media.PixelFormats.Pbgra32); target.Render(visual); byte[] rendered = new byte[400]; target.CopyPixels(rendered, 40, 0); bool rasterAvailable = rendered.Any(b => b != 0); if (rasterAvailable) Check(true, "WPF pixel rendering"); else Console.WriteLine("SKIP WPF visual pixels: graphics capture unavailable in this environment"); using (var host = new AppHost(Path.Combine(dir, "ui"), true))
+            var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown }; RestoreSafetyTests(dir); var visual = new System.Windows.Media.DrawingVisual(); using (var dc = visual.RenderOpen()) dc.DrawRectangle(System.Windows.Media.Brushes.Yellow, null, new Rect(0, 0, 10, 10)); var target = new System.Windows.Media.Imaging.RenderTargetBitmap(10, 10, 96, 96, System.Windows.Media.PixelFormats.Pbgra32); target.Render(visual); byte[] rendered = new byte[400]; target.CopyPixels(rendered, 40, 0); bool rasterAvailable = rendered.Any(b => b != 0); if (rasterAvailable) Check(true, "WPF pixel rendering"); else Console.WriteLine("SKIP WPF visual pixels: graphics capture unavailable in this environment"); using (var host = new AppHost(Path.Combine(dir, "ui"), true))
             {
                 var n = host.Library.Create(); n.PlainText = "WPF 编辑器\n☐ item"; n.Body = new byte[0]; host.Library.Save(n); host.Sync(); var w = host.Windows[n.Id]; Check(w.TextEditor != null, "WPF text window created"); w.TextEditor.SelectAll(); w.TextEditor.Format("bold"); w.Flush(); Check(n.Body.Length > 30 && n.PlainText.Contains("WPF"), "WPF RTF serialization"); var editor = new TextEditor(); editor.Read(n); Check(new System.Windows.Documents.TextRange(editor.Document.ContentStart, editor.Document.ContentEnd).Text.Contains("WPF"), "WPF RTF reload");
                 w.ToggleRoll(); Check(n.Rolled && w.Height == 24, "rolled window"); w.ToggleRoll(); Check(!n.Rolled, "unrolled window"); w.Toggle("lock"); Check(w.TextEditor.IsReadOnly, "content lock"); w.Toggle("lock");
@@ -168,14 +168,68 @@ namespace DeskPins.Tests
         {
             categories.SelectedItem = categories.Items.Cast<System.Windows.Controls.ListBoxItem>().First(item => (int)item.Tag == category);
         }
+        private static void RestoreSafetyTests(string dir)
+        {
+            var data = Path.Combine(dir, "restore-safety"); Directory.CreateDirectory(data);
+            using (var host = new AppHost(Path.Combine(data, "deskpins.db"), testMode: true))
+            {
+                var restored = host.Library.Create(); restored.Title = "Backup title"; host.Library.Save(restored);
+                var retained = host.Library.Create(); retained.Title = "Keep current"; host.Library.Save(retained);
+                var source = Path.Combine(dir, "restore-source.db"); host.Library.Repository.Backup(source);
+                restored.Title = "Current title"; host.Library.Save(restored); var id = restored.Id;
+                var backup = host.RestoreBackupData(source, true, new[] { id });
+                Check(File.Exists(backup) && host.Library.Notes[id].Title == "Backup title", "selective restore backs up current data before replacing matching note");
+                Check(host.Library.Notes[retained.Id].Title == "Keep current", "selective restore retains unselected current notes");
+                using (var before = new NoteRepository(backup)) Check(before.LoadMetadata().Single(n => n.Id == id).Title == "Current title", "restore protection backup contains the previous version");
+                var secondBackup = host.RestoreBackupData(source, true, new[] { id });
+                Check(secondBackup != backup && File.Exists(backup) && File.Exists(secondBackup), "consecutive restores never overwrite protection backups");
+                var damaged = Path.Combine(dir, "damaged-restore.db"); File.WriteAllText(damaged, "not a database");
+                var beforeCount = Directory.GetFiles(data, "before-restore-*.db").Length;
+                Throws(() => host.RestoreBackupData(damaged, true, new[] { id }), "invalid restore source is rejected before backup and mutation");
+                Check(Directory.GetFiles(data, "before-restore-*.db").Length == beforeCount && host.Library.Notes[id].Title == "Backup title", "invalid restore leaves current data and protection backups untouched");
+                using (var invalid = new Sqlite(source)) invalid.Run("UPDATE notes SET metadata=? WHERE id=?;", Json.Text(new Note { Id = "mismatched-id" }), id);
+                Throws(() => host.RestoreBackupData(source, true), "restore rejects inconsistent metadata identifiers");
+                Check(host.Library.Notes[id].Title == "Backup title" && Directory.GetFiles(data, "before-restore-*.db").Length == beforeCount, "invalid identifiers never commit or create protection backups");
+            }
+        }
         private static void InteractionTests(AppHost host)
         {
             var first = host.Library.Create(); var second = host.Library.Create();
+            foreach (var language in new[] { DeskPins.App.Localization.Chinese, DeskPins.App.Localization.English })
+            {
+                Ui.LoadLanguage(language);
+                using (var trayMenu = host.BuildTrayMenu())
+                {
+                    var trayItems = trayMenu.Items.OfType<System.Windows.Forms.ToolStripMenuItem>().ToArray();
+                    Check(trayItems.Length == 11 && trayItems.Any(i => i.Text == Ui.Text("从屏幕截取新建…")), "tray menu builds without showing a notification icon " + language);
+                    Check(trayItems.Single(i => i.Text == Ui.Text("从屏幕截取新建…")).ShortcutKeyDisplayString == "", "screen capture does not advertise an unsupported shortcut " + language);
+                    Check(trayItems.Single(i => i.Text == Ui.Text("新建便签")).ShortcutKeyDisplayString == host.Library.Catalog.Settings.GlobalNewKey, "tray new note displays configured global shortcut " + language);
+                }
+            }
+            Ui.LoadLanguage(DeskPins.App.Localization.Chinese);
             host.Focus(first); Check(System.Windows.Input.FocusManager.GetFocusedElement(host.Windows[first.Id]) == host.Windows[first.Id].TextEditor, "focusing note targets text editor for immediate typing");
             var copyTarget = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(host.Library.Repository.FilePath)), "data-copy-target");
             var copyPointer = Path.Combine(copyTarget, "pointer.txt");
             host.ApplyDataDirectory(copyTarget, copyPointer);
             Check(File.Exists(Path.Combine(copyTarget, "deskpins.db")) && File.ReadAllText(copyPointer).Trim() == Path.GetFullPath(copyTarget), "data directory migration copies database and pointer");
+            var copyBytes = File.ReadAllBytes(Path.Combine(copyTarget, "deskpins.db")); host.ValidateDataDirectory(copyTarget);
+            Check(copyBytes.SequenceEqual(File.ReadAllBytes(Path.Combine(copyTarget, "deskpins.db"))), "data directory preflight never modifies an existing database");
+            Throws(() => host.ValidateDataDirectory(Path.Combine(host.DataDirectory, "child")), "data directory preflight rejects current directory descendants");
+            var foreignTarget = Path.Combine(Path.GetDirectoryName(copyTarget), "foreign-data-target"); Directory.CreateDirectory(foreignTarget);
+            var foreignDatabase = Path.Combine(foreignTarget, "deskpins.db"); using (var foreignDb = new Sqlite(foreignDatabase)) foreignDb.Execute("CREATE TABLE sample(value TEXT);");
+            var foreignBytes = File.ReadAllBytes(foreignDatabase); Throws(() => host.ValidateDataDirectory(foreignTarget), "data directory preflight rejects foreign database");
+            Check(foreignBytes.SequenceEqual(File.ReadAllBytes(foreignDatabase)), "rejected target database remains unchanged");
+            Check(host.ApplySettingsReport().Count == 0, "test mode does not register hotkeys or start network listeners");
+            int attempts = 0;
+            var stepErrors = AppHost.ApplySteps(new[] {
+                new System.Collections.Generic.KeyValuePair<string, Action>("first", () => { attempts++; throw new IOException("test failure"); }),
+                new System.Collections.Generic.KeyValuePair<string, Action>("second", () => attempts++),
+                new System.Collections.Generic.KeyValuePair<string, Action>("third", () => attempts++) });
+            Check(attempts == 3 && stepErrors.Count == 1 && stepErrors[0].Contains("first"), "application steps report individual failure without skipping later actions");
+            host.ApplyDataDirectory(host.DataDirectory, copyPointer);
+            Check(File.ReadAllText(copyPointer).Trim() == host.DataDirectory, "data directory can reset a pending pointer to the running directory");
+            var explicitOwner = new Window(); new WindowInteropHelper(explicitOwner).EnsureHandle(); var ownerDialog = new Window { Owner = explicitOwner, ShowInTaskbar = false }; Ui.FitDialog(ownerDialog);
+            Check(ReferenceEquals(ownerDialog.Owner, explicitOwner), "dialog fitting preserves explicitly supplied owner"); ownerDialog.Close(); explicitOwner.Close();
             var firstWindow = host.Windows[first.Id];
             Ui.LoadLanguage("en-US");
             Check(Ui.Text("管理便签…") == "Manage notes…", "tray and note manage label translates");
@@ -189,7 +243,12 @@ namespace DeskPins.Tests
             Check(managerMenu.Items.OfType<System.Windows.Controls.MenuItem>().Any(i => i.Header.ToString() == Ui.Text("设置标题…")), "manager note menu exposes Set title");
             var categories = Field<System.Windows.Controls.ListBox>(manager, "categories"); var listing = Field<System.Windows.Controls.ListBox>(manager, "notes");
             Check(categories.Items.Count == 11, "manager keeps the icon category rail");
-            Check(categories.Items.Cast<System.Windows.Controls.ListBoxItem>().Select(i => (int)i.Tag).SequenceEqual(new[] { 0, 1, 2, 9, 8, 3, 4, 5, 6, 7, 10 }), "manager rail places tags below stacks and stored below tags");
+            var railItems = categories.Items.Cast<System.Windows.Controls.ListBoxItem>().ToArray();
+            Check(railItems.All(i => i.Content is System.Windows.Controls.StackPanel && ((System.Windows.Controls.StackPanel)i.Content).Children.OfType<System.Windows.Controls.TextBlock>().Count() == 2), "manager rail shows an icon with a caption");
+            var railIcon = ((System.Windows.Controls.StackPanel)railItems[0].Content).Children.OfType<System.Windows.Controls.TextBlock>().First(); var railCaption = ((System.Windows.Controls.StackPanel)railItems[0].Content).Children.OfType<System.Windows.Controls.TextBlock>().Last();
+            Check(railIcon.FontFamily.Source == "Segoe MDL2 Assets" && railCaption.FontSize <= 10 && railCaption.TextAlignment == TextAlignment.Center && railCaption.HorizontalAlignment == HorizontalAlignment.Center, "manager rail centers a small icon caption");
+            Check(((System.Windows.Controls.StackPanel)railItems.Single(i => (int)i.Tag == 10).Content).Children.OfType<System.Windows.Controls.TextBlock>().Last().Text == "Search", "manager rail labels the search category Search");
+            Check(railItems.Select(i => (int)i.Tag).SequenceEqual(new[] { 0, 1, 2, 9, 8, 3, 4, 5, 6, 7, 10 }), "manager rail places tags below stacks and stored below tags");
             SelectCategory(categories, 1); listing.SelectedItems.Add(first); listing.SelectedItems.Add(second); manager.Refresh();
             Check(listing.SelectedItems.Count == 2, "manager refresh preserves multiple selection");
             var folder = new Folder { Name = "Collection added while manager is open" }; host.Library.Catalog.Folders.Add(folder); SelectCategory(categories, 8);
@@ -225,13 +284,19 @@ namespace DeskPins.Tests
             host.Library.Catalog.Settings.SearchStored = true; host.Library.Catalog.Settings.SearchTagFilter = new System.Collections.Generic.List<string> { searchTag.Id }; manager.Refresh();
             Check(listing.Items.Cast<Note>().All(n => n.Id != storedHit.Id) && listing.Items.Cast<Note>().Any(n => n.Id == desktopHit.Id), "search tag filter narrows results");
             host.Library.Catalog.Settings.SearchTagFilter.Clear(); manager.Refresh();
+            var findBar = Field<System.Windows.Controls.Border>(manager, "findBar");
+            var resetButton = Descendants(findBar).OfType<System.Windows.Controls.Button>().Single(b => System.Windows.Automation.AutomationProperties.GetName(b) == Ui.Text("重置搜索"));
+            Check(resetButton.Content is System.Windows.Controls.TextBlock && !Descendants(findBar).OfType<System.Windows.Controls.Button>().Any(b => b.Content?.ToString() == "重置搜索"), "find bar replaces the close X with a reset icon");
+            resetButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            Check(Field<System.Windows.Controls.TextBox>(manager, "search").Text == "" && host.Library.Catalog.Settings.SearchStored && host.Library.Catalog.Settings.SearchContent, "find bar reset restores search scopes");
             var tagDialogType = typeof(ManagerWindow).Assembly.GetType("DeskPins.App.SearchTagWindow");
             var tagDialog = (Window)Activator.CreateInstance(tagDialogType, new object[] { host, new System.Collections.Generic.List<string>() });
-            Check(Descendants((DependencyObject)tagDialog.Content).OfType<System.Windows.Controls.Button>().Any(b => b.Content.ToString() == "设置以上标签"), "search tag filter dialog exposes filter actions");
+            Check(Descendants((DependencyObject)tagDialog.Content).OfType<System.Windows.Controls.Button>().Any(b => b.Content.ToString() == "应用标签"), "search tag filter dialog exposes filter actions");
             SelectCategory(categories, 6); manager.Refresh();
             var calendarHost = Field<System.Windows.Controls.Border>(manager, "calendarHost");
             var dayButtons = Descendants(calendarHost).OfType<System.Windows.Controls.Button>().Where(b => b.Tag is DateTime).ToList();
             Check(dayButtons.Count == DateTime.DaysInMonth(DateTime.Today.Year, DateTime.Today.Month), "calendar renders every day of the selected month");
+            Check(!Descendants(calendarHost).OfType<System.Windows.Controls.ScrollViewer>().Any(), "calendar month fits without an internal scrollbar");
             SelectCategory(categories, 8); manager.Refresh();
             var imageNote = host.Library.Create(NoteKind.Image); host.Sync(); var imageWindow = host.Windows[imageNote.Id];
             host.Library.Catalog.Settings.Styles[1].Color = "#123456"; host.Library.Catalog.Settings.Styles[1].Topmost = true; imageWindow.ApplyStyle(1);
@@ -299,6 +364,11 @@ namespace DeskPins.Tests
             yield return root;
             foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>()) foreach (var descendant in Descendants(child)) yield return descendant;
         }
+        private static System.Collections.Generic.IEnumerable<DependencyObject> VisualDescendants(DependencyObject root)
+        {
+            yield return root;
+            for (int i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); i++) foreach (var descendant in VisualDescendants(System.Windows.Media.VisualTreeHelper.GetChild(root, i))) yield return descendant;
+        }
         private static System.Collections.Generic.IEnumerable<System.Windows.Controls.TreeViewItem> TreeItems(System.Windows.Controls.ItemCollection items)
         {
             foreach (System.Windows.Controls.TreeViewItem item in items)
@@ -310,9 +380,17 @@ namespace DeskPins.Tests
         private static FrameworkElement Layout(Window window, double width, double height, string name)
         {
             var root = (FrameworkElement)window.Content; window.Content = null;
+            if (auditDirectory != null)
+            {
+                foreach (var text in Descendants(root).OfType<System.Windows.Controls.TextBlock>()) if (text.Text.IndexOf(Path.GetTempPath(), StringComparison.OrdinalIgnoreCase) >= 0) text.Text = text.Text.Replace(Path.GetTempPath(), "C:\\path\\to\\test-data\\");
+            }
             root.Measure(new Size(width, height)); root.Arrange(new Rect(0, 0, width, height)); root.UpdateLayout();
             if (auditDirectory != null)
             {
+                foreach (var text in Descendants(root).OfType<System.Windows.Controls.TextBlock>())
+                    if (text.Text.IndexOf("DeskPins-tests-", StringComparison.OrdinalIgnoreCase) >= 0) text.Text = System.Text.RegularExpressions.Regex.Replace(text.Text, @"[A-Za-z]:[\\/].*?DeskPins-tests-[^\\/]+", @"C:\path\to\test-data", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                foreach (var box in Descendants(root).OfType<System.Windows.Controls.TextBox>().Where(b => b.IsReadOnly && b.Text.IndexOf("DeskPins-tests-", StringComparison.OrdinalIgnoreCase) >= 0)) box.Text = @"C:\path\to\test-data";
+                root.UpdateLayout();
                 Directory.CreateDirectory(auditDirectory); var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)width, (int)height, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
                 var drawing = new System.Windows.Media.DrawingVisual(); using (var dc = drawing.RenderOpen()) dc.DrawRectangle(System.Windows.Media.Brushes.White, null, new Rect(0, 0, width, height)); bitmap.Render(drawing); bitmap.Render(root);
                 var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); using (var file = File.Create(Path.Combine(auditDirectory, name + ".png"))) encoder.Save(file);
@@ -322,6 +400,15 @@ namespace DeskPins.Tests
         private static void LayoutTests(AppHost host, ManagerWindow manager, Note note)
         {
             var categories = Field<System.Windows.Controls.ListBox>(manager, "categories"); var preview = Field<System.Windows.Controls.ContentControl>(manager, "preview"); var notes = Field<System.Windows.Controls.ListBox>(manager, "notes"); var homeView = Field<System.Windows.Controls.ScrollViewer>(manager, "homeView");
+            foreach (var historical in new[] { NoteState.Closed, NoteState.Stored, NoteState.Sleeping })
+            {
+                var historicalNote = host.Library.Create(); host.Library.Move(historicalNote, historical);
+                SelectCategory(categories, historical == NoteState.Closed ? 7 : historical == NoteState.Stored ? 8 : 4); manager.Refresh(); notes.SelectedItem = historicalNote;
+                typeof(ManagerWindow).GetMethod("OpenSelected", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(manager, null);
+                Check(historicalNote.State == historical, "viewing historical note does not restore " + historical);
+                typeof(ManagerWindow).GetMethod("RestoreSelected", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(manager, null);
+                Check(historicalNote.State == NoteState.Desktop, "explicit restore moves note to desktop " + historical); host.Library.Delete(historicalNote);
+            }
             var persistFolder = new Folder { Name = "Persist folder" }; host.Library.Catalog.Folders.Add(persistFolder);
             var persistNote = host.Library.Create(); persistNote.Title = "Persist note"; host.Library.Move(persistNote, NoteState.Stored, persistFolder.Id); host.Library.SaveCatalog();
             var persistManager = new ManagerWindow(host);
@@ -347,36 +434,116 @@ namespace DeskPins.Tests
             Check(inlineNote.Title == "Inline after", "inline title edit commits on focus loss");
             host.Library.Delete(inlineNote);
             var outlineColumn = Field<System.Windows.Controls.ColumnDefinition>(manager, "outlineColumn"); var listColumn = Field<System.Windows.Controls.ColumnDefinition>(manager, "listColumn");
+            var getOutlineWidth = typeof(ManagerWindow).GetMethod("GetOutlineWidth", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             host.Library.Catalog.Settings.ManagerOutlineWidths[2] = 250; host.Library.Catalog.Settings.ManagerListWidths[2] = 350;
             host.Library.Catalog.Settings.ManagerOutlineWidths[8] = 230; host.Library.Catalog.Settings.ManagerListWidths[8] = 320;
             SelectCategory(categories, 2); manager.Refresh();
-            Check(Math.Abs(outlineColumn.Width.Value - 250) < .1 && Math.Abs(listColumn.Width.Value - 350) < .1, "manager restores stack pane widths");
+            Check(outlineColumn.Width.IsAbsolute && Math.Abs(outlineColumn.Width.Value - 250) < .1 && Math.Abs(listColumn.Width.Value - 350) < .1, "manager restores stack pane widths");
             SelectCategory(categories, 8); manager.Refresh();
-            Check(Math.Abs(outlineColumn.Width.Value - 230) < .1 && Math.Abs(listColumn.Width.Value - 320) < .1, "manager restores stored pane widths separately");
+            Check(Math.Abs((double)getOutlineWidth.Invoke(manager, new object[] { 8 }) - 230) < .1 && Math.Abs(listColumn.Width.Value - 320) < .1, "manager restores stored pane widths separately");
             host.Library.Catalog.Settings.ManagerOutlineWidths[2] = 220; host.Library.Catalog.Settings.ManagerListWidths[2] = 340;
             host.Library.Catalog.Settings.ManagerOutlineWidths[8] = 220; host.Library.Catalog.Settings.ManagerListWidths[8] = 340; manager.Refresh();
             host.Library.Move(note, NoteState.Stored); SelectCategory(categories, 8); manager.Refresh(); notes.SelectedItem = note;
             Layout(manager, 900, 520, "manager-minimum"); Check(notes.ActualWidth >= 200 && preview.ActualWidth >= 200, "manager minimum size keeps list and content usable");
+            var treeView = Field<System.Windows.Controls.TreeView>(manager, "tree");
+            var countRightEdges = Descendants((DependencyObject)treeView).OfType<System.Windows.Controls.TreeViewItem>().Select(node =>
+            {
+                var grid = node.Header as System.Windows.Controls.Grid; var number = grid == null ? null : grid.Children.OfType<System.Windows.Controls.TextBlock>().LastOrDefault();
+                return number == null ? double.NaN : number.TranslatePoint(new Point(number.ActualWidth, 0), treeView).X;
+            }).Where(value => !double.IsNaN(value)).ToArray();
+            Check(countRightEdges.Length >= 3 && countRightEdges.Max() - countRightEdges.Min() < 1, "manager tree counts align across folder depths");
+            var listActionNames = new[] { "新建便签", "查看 / 编辑", "恢复到桌面", "关闭便签（可恢复）" };
+            var listActions = Descendants((DependencyObject)Field<System.Windows.Controls.Border>(manager, "listHost")).OfType<System.Windows.Controls.Button>().Where(b => listActionNames.Contains(System.Windows.Automation.AutomationProperties.GetName(b))).ToArray();
+            Check(listActions.Length == 4 && listActions.All(b => b.Content is System.Windows.Controls.TextBlock && b.Width == 32 && b.Height == 30), "manager list actions are uniform icon buttons");
+            Check(listActions.Select(b => b.TranslatePoint(new Point(0, 0), (UIElement)manager.Content).Y).Distinct().Count() == 1, "manager list icons share one row");
+            var outlineActionNames = new[] { "新建…", "属性…", "删除" };
+            var outlineActions = Descendants((DependencyObject)Field<System.Windows.Controls.Border>(manager, "outlineHost")).OfType<System.Windows.Controls.Button>().Where(b => outlineActionNames.Contains(System.Windows.Automation.AutomationProperties.GetName(b))).ToArray();
+            Check(outlineActions.Length == 3 && outlineActions.All(b => b.Content is System.Windows.Controls.TextBlock && b.Width == 32) && outlineActions.Select(b => b.TranslatePoint(new Point(0, 0), (UIElement)manager.Content).Y).Distinct().Count() == 1, "manager collection tools align as icon buttons");
+            var previewActionNames = new[] { "重试保存", "设置标题…", "属性…", "恢复到桌面" };
+            var previewActions = Descendants((DependencyObject)Field<System.Windows.Controls.Border>(manager, "previewHost")).OfType<System.Windows.Controls.Button>().Where(b => previewActionNames.Contains(System.Windows.Automation.AutomationProperties.GetName(b))).ToArray();
+            Check(previewActions.Length == 4 && previewActions.All(b => b.Content is System.Windows.Controls.TextBlock) && previewActions.Select(b => b.TranslatePoint(new Point(0, 0), (UIElement)manager.Content).Y).Distinct().Count() == 1, "manager preview actions align as icon buttons");
+            var countBlock = Field<System.Windows.Controls.TextBlock>(manager, "count"); var orderBox = Field<System.Windows.Controls.ComboBox>(manager, "order"); var headingBlock = Field<System.Windows.Controls.TextBlock>(manager, "heading");
+            var headingBottom = headingBlock.TranslatePoint(new Point(0, headingBlock.ActualHeight), (UIElement)manager.Content).Y;
+            var countBottom = countBlock.TranslatePoint(new Point(0, countBlock.ActualHeight), (UIElement)manager.Content).Y;
+            Check(Math.Abs(headingBottom - countBottom) < 3, "manager count shares the category title row");
+            var actionCenter = listActions[0].TranslatePoint(new Point(0, listActions[0].ActualHeight / 2), (UIElement)manager.Content).Y;
+            var orderCenter = orderBox.TranslatePoint(new Point(0, orderBox.ActualHeight / 2), (UIElement)manager.Content).Y;
+            Check(Math.Abs(actionCenter - orderCenter) < 2, "manager list actions and sort selector share a row");
+            var orderRight = orderBox.TranslatePoint(new Point(orderBox.ActualWidth, 0), (UIElement)manager.Content).X;
+            var listRight = Field<System.Windows.Controls.Border>(manager, "listHost").TranslatePoint(new Point(Field<System.Windows.Controls.Border>(manager, "listHost").ActualWidth, 0), (UIElement)manager.Content).X;
+            Check(orderBox.ActualWidth > 0 && orderRight <= listRight + .5, "sort selector stays inside the list header");
+            Check(orderBox.Width >= 80 && orderBox.Width <= 96, "sort selector width adapts to its longest label");
+            orderBox.ApplyTemplate(); Check(System.Windows.Media.VisualTreeHelper.GetChildrenCount(orderBox) > 0 && orderBox.Template.FindName("PART_Popup", orderBox) is System.Windows.Controls.Primitives.Popup, "sort selector uses the themed flat template with a dropdown popup");
             Layout(manager, 1180, 720, "manager-default"); Check(notes.ActualWidth >= 200 && preview.ActualWidth > 300, "manager content grows with window");
+            Check(Field<System.Windows.Controls.Border>(manager, "outlineHost").ActualWidth > outlineColumn.MinWidth + 50, "manager outline fills spare width instead of staying fixed");
+            var outlineHost = Field<System.Windows.Controls.Border>(manager, "outlineHost"); var listHost = Field<System.Windows.Controls.Border>(manager, "listHost");
+            var outlineBefore = outlineHost.ActualWidth; var listBefore = listHost.ActualWidth; var previewBefore = preview.ActualWidth;
+            var resizeOutline = typeof(ManagerWindow).GetMethod("ResizeOutlinePane", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            resizeOutline.Invoke(manager, new object[] { -1000d }); manager.UpdateLayout();
+            var draggedOutline = outlineHost.ActualWidth; var draggedList = listHost.ActualWidth;
+            Check(draggedOutline >= 99.5 && Math.Abs(draggedOutline + draggedList - outlineBefore - listBefore) < .5 && Math.Abs(preview.ActualWidth - previewBefore) < .5, "first splitter stops at 100px and leaves the second splitter and preview fixed");
+            typeof(ManagerWindow).GetMethod("Refresh", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance).Invoke(manager, null); manager.UpdateLayout();
+            Check(Math.Abs(outlineHost.ActualWidth - draggedOutline) < .5 && Math.Abs(listHost.ActualWidth - draggedList) < .5 && Math.Abs(preview.ActualWidth - previewBefore) < .5, "dragged splitter widths survive the catalog refresh");
+            typeof(ManagerWindow).GetMethod("SavePaneWidths", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(manager, null);
+            Check(Math.Abs(host.Library.Catalog.Settings.ManagerOutlineWidths[8] - draggedOutline) < .5, "a 100px outline width is persisted");
+            resizeOutline.Invoke(manager, new object[] { 1000d }); manager.UpdateLayout();
+            Check(outlineHost.ActualWidth <= 420.5, "first splitter keeps its upper bound");
+            host.Library.Catalog.Settings.ManagerOutlineWidths[8] = 220; host.Library.Catalog.Settings.ManagerListWidths[8] = 340;
+            SelectCategory(categories, 2); manager.Refresh(); SelectCategory(categories, 8); manager.Refresh();
+            notes.SelectedItem = note; manager.UpdateLayout(); var categoryOutlineWidth = outlineHost.ActualWidth; var categoryListWidth = listHost.ActualWidth;
+            var desktopNote = host.Library.Notes.Values.FirstOrDefault(n => n.State == NoteState.Desktop && n.StackId == "" && n.Attachment == null);
+            SelectCategory(categories, 1); manager.Refresh(); if (desktopNote != null) notes.SelectedItem = desktopNote;
+            SelectCategory(categories, 8); manager.Refresh(); manager.UpdateLayout();
+            Check(ReferenceEquals(notes.SelectedItem, note), "manager restores per-category note selection");
+            Check(Math.Abs(outlineHost.ActualWidth - categoryOutlineWidth) < .5 && Math.Abs(listHost.ActualWidth - categoryListWidth) < .5, "manager restores per-category pane widths");
             var reminder = new ScheduleWindow(host, note, true, true); var controls = Descendants((DependencyObject)reminder.Content).ToArray(); var combos = controls.OfType<System.Windows.Controls.ComboBox>().ToArray();
             combos[0].SelectedIndex = 1; var relativeMinutes = controls.OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c).StartsWith("分钟数")); var time = controls.OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c) == "时间"); Check(((FrameworkElement)time.Parent).Visibility == Visibility.Collapsed && ((FrameworkElement)relativeMinutes.Parent).Visibility == Visibility.Visible, "relative reminder uses independent minute input");
             combos[1].SelectedIndex = 5; Layout(reminder, 464, 370, "reminder-interval"); var visibleTextFields = controls.OfType<System.Windows.Controls.TextBox>().Where(c => ((FrameworkElement)c.Parent).Visibility == Visibility.Visible).ToArray(); Check(visibleTextFields.Contains(relativeMinutes), "minute field remains present for interval recurrence");
             var day = controls.OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c).StartsWith("日（")); var interval = controls.OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c).StartsWith("间隔数量")); Check(((FrameworkElement)day.Parent).Visibility == Visibility.Collapsed && ((FrameworkElement)interval.Parent).Visibility == Visibility.Visible, "recurrence only displays relevant parameters");
-            var reminderButtons = controls.OfType<System.Windows.Controls.Button>().ToArray(); var cancel = reminderButtons.Single(c => c.Content.ToString() == "取消"); Check(cancel.IsCancel && reminderButtons.Single(c => c.Content.ToString() == "确定").IsDefault && cancel.TranslatePoint(new Point(), (UIElement)reminder.Content).Y + cancel.ActualHeight <= 370, "reminder buttons stay reachable in short window");
+            var reminderButtons = controls.OfType<System.Windows.Controls.Button>().ToArray(); var cancel = reminderButtons.Single(c => c.Content?.ToString() == "取消"); Check(cancel.IsCancel && reminderButtons.Single(c => c.Content?.ToString() == "确定").IsDefault && cancel.TranslatePoint(new Point(), (UIElement)reminder.Content).Y + cancel.ActualHeight <= 370, "reminder buttons stay reachable in short window");
             var scheduled = host.Library.Create(); var simpleReminder = new ScheduleWindow(host, scheduled, true, false); var simpleControls = Descendants((DependencyObject)simpleReminder.Content).ToArray(); simpleControls.OfType<System.Windows.Controls.ComboBox>().Single().SelectedIndex = 1;
             simpleControls.OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c).StartsWith("分钟数")).Text = "15";
-            var before = DateTime.UtcNow; simpleControls.OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "确定").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); Check(scheduled.State == NoteState.Sleeping && scheduled.WakeUtc >= before.AddMinutes(15) && scheduled.WakeUtc <= DateTime.UtcNow.AddMinutes(15), "relative reminder commits correct future wake time");
-            var clearSleep = new ScheduleWindow(host, scheduled, true, false); Descendants((DependencyObject)clearSleep.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "清除").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); Check(scheduled.State == NoteState.Desktop && scheduled.WakeUtc == null, "clearing sleep restores desktop state");
-            var untouched = new ScheduleWindow(host, scheduled, true, false); Descendants((DependencyObject)untouched.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "取消").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); Check(scheduled.State == NoteState.Desktop && scheduled.WakeUtc == null, "cancel reminder leaves note unchanged");
+            var before = DateTime.UtcNow; simpleControls.OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "确定").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); Check(scheduled.State == NoteState.Sleeping && scheduled.WakeUtc >= before.AddMinutes(15) && scheduled.WakeUtc <= DateTime.UtcNow.AddMinutes(15), "relative reminder commits correct future wake time");
+            var clearSleep = new ScheduleWindow(host, scheduled, true, false); Descendants((DependencyObject)clearSleep.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "清除").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); Check(scheduled.State == NoteState.Desktop && scheduled.WakeUtc == null, "clearing sleep restores desktop state");
+            var untouched = new ScheduleWindow(host, scheduled, true, false); Descendants((DependencyObject)untouched.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "取消").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); Check(scheduled.State == NoteState.Desktop && scheduled.WakeUtc == null, "cancel reminder leaves note unchanged");
             var transferFile = host.Library.Catalog.Settings.TransferFile; host.Library.Catalog.Settings.TransferFile = ""; var configuration = new SettingsWindow(host); host.Library.Catalog.Settings.TransferFile = transferFile;
             Check(configuration.ShowInTaskbar, "settings window is independent and visible in the taskbar");
             var navigation = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.ListBox>().Single();
             Check(navigation.Items.Count == 9, "settings uses a nine-category navigation rail");
             for (int i = 0; i < navigation.Items.Count; i++) { navigation.SelectedIndex = i; Layout(configuration, 900, 640, "settings-" + i); }
-            Check(Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "取消").IsCancel, "settings supports Escape cancel");
+            Check(Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "取消").IsCancel, "settings supports Escape cancel");
             Layout(configuration, 900, 640, "settings-data");
-            var dataButtons = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Button>().Select(c => c.Content.ToString()).ToArray();
+            var dataButtons = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Button>().Select(c => c.Content?.ToString()).ToArray();
             Check(dataButtons.Contains("备份…") && dataButtons.Contains("恢复全部…") && dataButtons.Contains("导入便签…") && dataButtons.Contains("救回屏幕外便签"), "settings data page owns import and recovery actions");
+            navigation.SelectedIndex = 1;
+            var snapBox = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c) == "吸附距离");
+            snapBox.Text = "invalid";
+            navigation.SelectedIndex = 8; navigation.SelectedIndex = 1;
+            snapBox = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c) == "吸附距离");
+            Check(snapBox.Text == "invalid" && System.Windows.Automation.AutomationProperties.GetHelpText(snapBox).Length > 0, "invalid numeric draft remains visible after switching pages");
+            navigation.SelectedIndex = 8;
+            Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "保存").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            Check(navigation.SelectedIndex == 1, "save navigates to a field error on another page");
+            snapBox = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c) == "吸附距离"); snapBox.Text = "12";
+            Check(System.Windows.Automation.AutomationProperties.GetHelpText(snapBox).Length == 0, "correcting invalid numeric draft clears field feedback");
+            navigation.SelectedIndex = 5;
+            var portBox = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TextBox>().Single(c => c.Tag != null && c.Tag.GetType().GetField("Key", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(c.Tag).ToString() == "NetworkPort");
+            portBox.Text = "abc"; navigation.SelectedIndex = 0;
+            var previewLanguage = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.ComboBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c) == "界面语言"); previewLanguage.SelectedIndex = 1;
+            navigation = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.ListBox>().Single(); navigation.SelectedIndex = 5;
+            portBox = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c) == "Listen port");
+            Check(portBox.Text == "abc" && System.Windows.Automation.AutomationProperties.GetHelpText(portBox).Length > 0, "invalid port survives page and language changes"); portBox.Text = "52673";
+            navigation.SelectedIndex = 0; previewLanguage = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.ComboBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c) == "Language"); previewLanguage.SelectedIndex = 0;
+            navigation = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.ListBox>().Single(); navigation.SelectedIndex = 2;
+            var styleSelector = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.ComboBox>().First();
+            var tabWidthBox = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c) == "Tab 宽度（twips）"); tabWidthBox.Text = "bad";
+            styleSelector.SelectedIndex = 1;
+            Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "保存").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            styleSelector = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.ComboBox>().First();
+            tabWidthBox = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c) == "Tab 宽度（twips）");
+            Check(styleSelector.SelectedIndex == 0 && tabWidthBox.Text == "bad", "save locates an invalid field in another style"); tabWidthBox.Text = "720";
+            var styleName = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c) == "名称"); styleName.Text = "Renamed style";
+            Check(styleSelector.SelectedIndex == 0 && styleSelector.Items[0].ToString().Contains("Renamed style"), "style name refreshes without changing selection");
             navigation.SelectedIndex = 7;
             var hotkeyTabs = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TabControl>().Single();
             Check(hotkeyTabs.Items.Count == 2, "settings separates global and in-app shortcuts");
@@ -389,8 +556,13 @@ namespace DeskPins.Tests
             Check(newToggle != null && newToggle.IsChecked == true && newKey != null && newKey.Text == "N", "in-app shortcut row exposes toggle and captured key");
             newToggle.IsChecked = false;
             Check(draft.Shortcuts["new"] == "" && draft.DisabledShortcuts.ContainsKey("new"), "disabling in-app shortcut preserves its gesture");
+            using (var keySource = new HwndSource(new HwndSourceParameters("disabled-key-capture-test")))
+            {
+                newKey.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice, keySource, 0, System.Windows.Input.Key.Q) { RoutedEvent = System.Windows.Input.Keyboard.PreviewKeyDownEvent });
+            }
+            Check(newToggle.IsChecked == false && draft.Shortcuts["new"] == "" && draft.DisabledShortcuts["new"].EndsWith("Q"), "editing disabled shortcut does not enable it");
             newToggle.IsChecked = true;
-            Check(draft.Shortcuts["new"] == "Ctrl+N" && !draft.DisabledShortcuts.ContainsKey("new"), "enabling in-app shortcut restores its gesture");
+            Check(draft.Shortcuts["new"].EndsWith("Q") && !draft.DisabledShortcuts.ContainsKey("new"), "enabling in-app shortcut restores edited gesture");
             using (var source = new System.Windows.Interop.HwndSource(new System.Windows.Interop.HwndSourceParameters("key-capture-test")))
             {
                 newKey.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice, source, 0, System.Windows.Input.Key.Q) { RoutedEvent = System.Windows.Input.Keyboard.PreviewKeyDownEvent });
@@ -409,21 +581,31 @@ namespace DeskPins.Tests
             language = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.ComboBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c) == "Language");
             language.SelectedIndex = 0;
             Check(Ui.Text("保存") == "保存", "language dropdown returns to Chinese");
-            Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "保存").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "保存").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
             Check(host.Library.Catalog.Settings.Language == "zh-CN", "settings save commits the selected language");
-            foreach (var kind in new[] { "folders", "friends", "tags" }) { var collection = new CollectionsWindow(host, kind); Layout(collection, 444, 280, "collection-" + kind); Check(Descendants((DependencyObject)collection.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "关闭").IsCancel, "collection keyboard close " + kind); collection.Close(); }
-            var attachment = new AttachWindow(host, note); Descendants((DependencyObject)attachment.Content).OfType<System.Windows.Controls.ListBox>().Single().ItemsSource = new[] { new WindowInfo { Title = "Sample document — Editor", Class = "SampleEditor" } }; Layout(attachment, 524, 360, "attachment"); Check(Descendants((DependencyObject)attachment.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "确定").IsDefault, "attachment supports Enter confirm");
-            for (int category = 0; category <= 10; category++) { SelectCategory(categories, category); Layout(manager, 900, 520, "manager-category-" + category); Check(category == 0 ? homeView.ActualWidth >= 500 : notes.ActualWidth >= 200 && preview.ActualWidth >= 200, "minimum manager layout in category " + category); }
+            var savedName = host.Library.Catalog.Settings.Styles[0].Name; Field<Settings>(configuration, "settings").Styles[0].Name = "Unsaved mutation";
+            Check(host.Library.Catalog.Settings.Styles[0].Name == savedName, "committed settings do not share the mutable editor draft");
+            var reloadConfiguration = new SettingsWindow(host); var reloadDraft = Field<Settings>(reloadConfiguration, "settings"); reloadDraft.NetworkPort = 123;
+            typeof(SettingsWindow).GetMethod("ReloadDraft", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(reloadConfiguration, null);
+            Check(!ReferenceEquals(reloadDraft, Field<Settings>(reloadConfiguration, "settings")) && Field<Settings>(reloadConfiguration, "settings").NetworkPort == host.Library.Catalog.Settings.NetworkPort, "restore reload discards old settings draft");             var restoredLanguage = host.Library.Catalog.Settings.Language; host.Library.Catalog.Settings.Language = Path.Combine(Path.GetDirectoryName(host.Library.Repository.FilePath), "missing-language.json");
+            typeof(SettingsWindow).GetMethod("ReloadDraft", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(reloadConfiguration, null);
+            Check(Descendants((DependencyObject)reloadConfiguration.Content).OfType<System.Windows.Controls.ListBox>().Single().Items.Count == 9 && Field<string>(reloadConfiguration, "statusMessage").Contains("missing-language"), "restore rebuilds controls even when the saved language cannot load");
+            host.Library.Catalog.Settings.Language = restoredLanguage; Ui.LoadLanguage(restoredLanguage); reloadConfiguration.Close();
+            foreach (var kind in new[] { "folders", "friends", "tags" }) { var collection = new CollectionsWindow(host, kind); Layout(collection, 444, 280, "collection-" + kind); Check(Descendants((DependencyObject)collection.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "关闭").IsCancel, "collection keyboard close " + kind); collection.Close(); }
+            var attachment = new AttachWindow(host, note); Descendants((DependencyObject)attachment.Content).OfType<System.Windows.Controls.ListBox>().Single().ItemsSource = new[] { new WindowInfo { Title = "Sample document — Editor", Class = "SampleEditor" } }; Layout(attachment, 524, 360, "attachment"); Check(Descendants((DependencyObject)attachment.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "确定").IsDefault, "attachment supports Enter confirm");
+            var calendarHost = Field<System.Windows.Controls.Border>(manager, "calendarHost"); for (int category = 0; category <= 10; category++) { SelectCategory(categories, category); Layout(manager, 900, 520, "manager-category-" + category); Check(category == 0 ? homeView.ActualWidth >= 500 : notes.ActualWidth >= 200 && preview.ActualWidth >= 200, "minimum manager layout in category " + category); if (category == 1) { typeof(ManagerWindow).GetMethod("ApplyThinScrollBars", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(manager, null); manager.UpdateLayout(); var bar = VisualDescendants((DependencyObject)notes).OfType<System.Windows.Controls.Primitives.ScrollBar>().FirstOrDefault(b => b.Orientation == System.Windows.Controls.Orientation.Vertical); Check(bar != null && bar.ActualWidth > 0 && bar.ActualWidth <= 7, "manager list scrollbar is thin"); } if (category == 6) { Check(notes.ActualHeight >= 120, "calendar keeps a usable note list at minimum size"); Check(calendarHost.ActualHeight <= 240, "compact calendar leaves room for the note list"); var lastDay = Descendants(calendarHost).OfType<System.Windows.Controls.Button>().Where(b => b.Tag is DateTime).OrderBy(b => (DateTime)b.Tag).Last(); Check(lastDay.TranslatePoint(new Point(0, lastDay.ActualHeight), calendarHost).Y <= calendarHost.ActualHeight + .5, "calendar shows the complete month without clipping"); } }
             var noteWindow = host.Windows.Values.First(w => w.TextEditor != null); noteWindow.TextEditor.InsertText("Sample note\n☐ Task one\n☑ Task two"); Layout(noteWindow, 260, 190, "note-text"); Check(noteWindow.TextEditor.ActualHeight > 100, "text note keeps editable body below title"); noteWindow.ToggleRoll(); Layout(noteWindow, 260, 24, "note-rolled"); noteWindow.ToggleRoll();
             var imageWindow = host.Windows.Values.First(w => w.ImageEditor != null); Layout(imageWindow, 260, 190, "note-image"); Check(imageWindow.ImageEditor.ActualWidth >= 250, "image note keeps canvas scrollable");
             var stack = new StackWindow(host, new NoteStack { Name = "Sample stack with a long title that must be trimmed", Width = 240, Height = 60 }); stack.Refresh(); Check(Math.Abs(stack.Width - 240) < .1 && Math.Abs(stack.Height - 60) < .1, "stack window restores its saved size"); Layout(stack, 240, 60, "stack"); stack.Close();
             var topStack = new StackWindow(host, new NoteStack { Name = "Topmost stack", Topmost = true }); Check(topStack.Topmost, "stack window reads saved topmost state"); topStack.Close();
-            var backupFile = Path.Combine(Path.GetDirectoryName(host.Library.Repository.FilePath), "layout-backup.db"); host.Library.Repository.Backup(backupFile); var backup = new BackupBrowserWindow(host, backupFile); Layout(backup, 444, 280, "backup"); Check(Descendants((DependencyObject)backup.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "取消").IsCancel, "backup browser supports Escape cancel"); backup.Close();
+            var backupFile = Path.Combine(Path.GetDirectoryName(host.Library.Repository.FilePath), "layout-backup.db"); host.Library.Repository.Backup(backupFile); var backup = new BackupBrowserWindow(host, backupFile); Layout(backup, 444, 280, "backup"); Check(Descendants((DependencyObject)backup.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "取消").IsCancel, "backup browser supports Escape cancel"); backup.Close();
             var about = new AboutWindow();
             var aboutTexts = Descendants((DependencyObject)about.Content).OfType<System.Windows.Controls.TextBlock>().Select(t => t.Text).ToArray();
             Check(aboutTexts.Contains("DeskPins") && aboutTexts.Any(t => t.Contains("作者 @zouv")), "about shows product name and author");
-            Check(Descendants((DependencyObject)about.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content.ToString() == "关闭").IsCancel, "about supports Escape close");
+            Check(Descendants((DependencyObject)about.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "关闭").IsCancel, "about supports Escape close");
             Layout(about, 480, 220, "about"); about.Close();
+            SelectCategory(categories, 8); manager.Refresh();
+            Ui.LoadLanguage("en-US"); var englishManager = new ManagerWindow(host); Layout(englishManager, 900, 520, "manager-en"); Check(Field<System.Windows.Controls.ListBox>(englishManager, "categories").Items.Cast<System.Windows.Controls.ListBoxItem>().Any(i => ((System.Windows.Controls.StackPanel)i.Content).Children.OfType<System.Windows.Controls.TextBlock>().Last().Text == "Search"), "manager icon rail localizes captions"); englishManager.Close(); Ui.LoadLanguage("zh-CN");
             reminder.Close(); configuration.Close(); attachment.Close();
         }
     }

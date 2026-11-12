@@ -32,6 +32,8 @@ namespace DeskPins.App
         public Rect Selection = Rect.Empty;
         public event Action Changed;
         public BitmapSource Image { get { return image; } }
+        public bool CanUndo { get { return !Locked && undo.Count > 0; } }
+        public bool CanRedo { get { return !Locked && redo.Count > 0; } }
         public ImageEditor()
         {
             Focusable = true; Cursor = Cursors.Cross;
