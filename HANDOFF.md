@@ -5,9 +5,9 @@
 ## 状态快照
 
 - 最近更新：2026-11-12。
-- 整体状态：无进行中代码任务。UI 一致性与交互安全优化、Manage Notes 图标导轨/操作按钮/日历对齐/分类状态记忆均已完成，成果见 CHANGELOG `[0.4.0]`、ROADMAP P8/P9；版本 0.4.0，构建、回归与打包通过，提交 / 标签 / Release 上传按本次发版流程执行。
+- 整体状态：无进行中代码任务。0.4.0 UI 一致性与交互安全版已发布（2026-11-12），Release：https://github.com/zouv/desk-pins/releases/tag/v0.4.0；工作树干净。
 - 工作分支：main。
-- 最后验证：Release 构建 0 警告 / 0 错误，286 项独立数据回归通过；`sh check-docs.sh` 与 `git diff --check` 通过。`sh manager.sh verify` 的测试与文档部分通过，但复制 `.runtime/build/dev/DeskPins.exe` 时该文件被运行中的进程占用而中止；未结束该进程，改用直接构建 + 测试 exe 完成验证。此前托盘启动修复后 `scripts/package.ps1` 打包成功，新包隔离 smoke 通过；本轮未重新打包。
+- 最后验证：Release 构建 0 警告 / 0 错误，286 项独立数据回归通过；`sh check-docs.sh` 与 `git diff --check` 通过；打包与 GitHub Release 上传成功（release zip / debug zip / SHA256SUMS）。
 - 离屏验证：96 DPI / 软件渲染，设置 900×640、管理器 900×520 / 1180×720、中英文及短弹框，产物在忽略目录 `.runtime/ui-manager-state-20261112-v7`。已核对分类宽度/选中/筛选恢复、6px 滚动条、80–96px 自适应排序、60px 导轨/30px 图标、Search 文案、大纲计数跨层级右对齐、标题/操作/预览行布局及完整月历；离屏不等同真实桌面验收。
 
 ## 当前任务
