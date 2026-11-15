@@ -246,8 +246,8 @@ namespace DeskPins.Tests
             var railItems = categories.Items.Cast<System.Windows.Controls.ListBoxItem>().ToArray();
             Check(railItems.All(i => i.Content is System.Windows.Controls.StackPanel && ((System.Windows.Controls.StackPanel)i.Content).Children.OfType<System.Windows.Controls.TextBlock>().Count() == 2), "manager rail shows an icon with a caption");
             var railIcon = ((System.Windows.Controls.StackPanel)railItems[0].Content).Children.OfType<System.Windows.Controls.TextBlock>().First(); var railCaption = ((System.Windows.Controls.StackPanel)railItems[0].Content).Children.OfType<System.Windows.Controls.TextBlock>().Last();
-            Check(railIcon.FontFamily.Source == "Segoe MDL2 Assets" && railCaption.FontSize <= 10 && railCaption.TextAlignment == TextAlignment.Center && railCaption.HorizontalAlignment == HorizontalAlignment.Center, "manager rail centers a small icon caption");
-            Check(((System.Windows.Controls.StackPanel)railItems.Single(i => (int)i.Tag == 10).Content).Children.OfType<System.Windows.Controls.TextBlock>().Last().Text == "Search", "manager rail labels the search category Search");
+            Check(railIcon.FontFamily.Source == "Segoe MDL2 Assets" && railCaption.FontSize == 11 && railCaption.MaxWidth == 78 && railCaption.TextAlignment == TextAlignment.Center && railCaption.HorizontalAlignment == HorizontalAlignment.Center, "manager rail centers a readable icon caption");
+            Check(((System.Windows.Controls.StackPanel)railItems.Single(i => (int)i.Tag == 10).Content).Children.OfType<System.Windows.Controls.TextBlock>().Last().Text == Ui.Text("搜索结果"), "manager rail localizes the search category");
             Check(railItems.Select(i => (int)i.Tag).SequenceEqual(new[] { 0, 1, 2, 9, 8, 3, 4, 5, 6, 7, 10 }), "manager rail places tags below stacks and stored below tags");
             SelectCategory(categories, 1); listing.SelectedItems.Add(first); listing.SelectedItems.Add(second); manager.Refresh();
             Check(listing.SelectedItems.Count == 2, "manager refresh preserves multiple selection");
@@ -270,6 +270,17 @@ namespace DeskPins.Tests
             host.Library.Catalog.Stacks.Add(firstStack); host.Library.Catalog.Stacks.Add(secondStack);
             moveCollection.Invoke(manager, new object[] { "stacks", secondStack.Id, firstStack, 0 });
             Check(host.Library.Catalog.Stacks.IndexOf(secondStack) < host.Library.Catalog.Stacks.IndexOf(firstStack), "stack drag reorders collection");
+            var visibleAttached = host.Library.Create(); visibleAttached.Title = "Visible attached and stacked"; visibleAttached.Attachment = new Attachment(); visibleAttached.StackId = firstStack.Id; host.Library.Save(visibleAttached);
+            Field<System.Collections.Generic.HashSet<string>>(host, "attachedVisible").Add(visibleAttached.Id);
+            visibleAttached.CreatedUtc = visibleAttached.ModifiedUtc.AddDays(-10); visibleAttached.StateUtc = visibleAttached.ModifiedUtc.AddDays(-5);
+            SelectCategory(categories, 3); manager.Refresh();
+            Check(listing.Items.Cast<Note>().Any(n => n.Id == visibleAttached.Id), "attachment category includes currently visible attached notes");
+            Check(visibleAttached.DateLabel == Ui.Text("修改于") + " " + visibleAttached.ModifiedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), "manager date always identifies the modified timestamp");
+            SelectCategory(categories, 1); manager.Refresh(); Check(listing.Items.Cast<Note>().All(n => n.Id != visibleAttached.Id), "desktop category still excludes attached and stacked notes");
+            SelectCategory(categories, 0); manager.Refresh();
+            var homeTexts = Descendants((DependencyObject)Field<System.Windows.Controls.ScrollViewer>(manager, "homeView").Content).OfType<System.Windows.Controls.TextBlock>().ToArray();
+            Check(new[] { Ui.Text("桌面"), Ui.Text("堆叠"), Ui.Text("附着") }.All(label => homeTexts.Any(t => t.Text == label && t.FontSize == 14)), "home dashboard keeps category labels visible");
+            Check(homeTexts.Any(t => t.Text == Ui.Text("合计：") + host.Library.Notes.Count), "home total counts each note once across overlapping categories");
             var firstOrderTag = new Tag { Name = "Order tag A" }; var secondOrderTag = new Tag { Name = "Order tag B" };
             host.Library.Catalog.Tags.Add(firstOrderTag); host.Library.Catalog.Tags.Add(secondOrderTag);
             moveCollection.Invoke(manager, new object[] { "tags", firstOrderTag.Id, secondOrderTag, 2 });
@@ -318,10 +329,24 @@ namespace DeskPins.Tests
             var noteMenu = (System.Windows.Controls.ContextMenu)typeof(NoteWindow).GetMethod("Menu", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(textWindow, null);
             var noteMenuHeaders = noteMenu.Items.OfType<System.Windows.Controls.MenuItem>().Select(m => m.Header.ToString()).ToList();
             Check(noteMenuHeaders.IndexOf(Ui.Text("新建便签")) >= 0 && noteMenuHeaders.IndexOf(Ui.Text("管理便签…")) > noteMenuHeaders.IndexOf(Ui.Text("新建便签")), "note menu adds New note above Manage notes");
+            var allNoteMenuItems = MenuItems(noteMenu.Items).Select(m => m.Header.ToString()).ToArray();
+            Check(new[] { "整理到", "显示与行为", "导出与传输", "存入文件夹", "放入堆叠", "点击穿透", "自动调整高度时固定底边", "仅显示此便签", "保存为…", "打印…", "设置皮肤…" }.All(allNoteMenuItems.Contains), "note menu groups advanced actions without removing operations");
+            Check(!noteMenuHeaders.Any(h => h.Contains("Ghost") || h.Contains("Stand") || h.Contains("Solo")), "note menu top level avoids implementation jargon");
+            Check(MenuItems(noteMenu.Items).Any(m => m.Header.ToString() == Ui.Text("设置皮肤…") && m.InputGestureText == host.ShortcutFor("skin")), "grouped note actions retain configured shortcuts");
+            Check(Ui.TextOn("#777777") == System.Windows.Media.Brushes.Black && Ui.TextOn("#747474") == System.Windows.Media.Brushes.White && Ui.TextOn("#FFFFFF") == System.Windows.Media.Brushes.Black && Ui.TextOn("#000000") == System.Windows.Media.Brushes.White, "note foreground selection follows WCAG contrast");
+            var titleBar = Field<System.Windows.Controls.Border>(textWindow, "title");
+            Check(((System.Windows.Media.SolidColorBrush)titleBar.Background).Color.ToString() == "#FF6B6B6B", "inactive note title uses contrast-safe background");
             var opacityMenu = noteMenu.Items.OfType<System.Windows.Controls.MenuItem>().First(m => m.Header.ToString() == "不透明度");
             opacityMenu.Items.OfType<System.Windows.Controls.MenuItem>().First(m => m.Header.ToString() == "50%").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.MenuItem.ClickEvent));
             Check(textNote.Opacity == .5 && Field<bool>(textWindow, "showOpacity"), "opacity menu applies immediately during active editing");
             Check(Math.Abs(textWindow.Opacity - .5) < .01, "opacity menu updates the live window opacity");
+            var applyOpacity = typeof(NoteWindow).GetMethod("ApplyOpacity", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            host.Library.Catalog.Settings.OpaqueEditing = true; host.Library.Catalog.Settings.RestoreOpacityAfterEditing = false; textWindow.Opacity = 1;
+            applyOpacity.Invoke(textWindow, new object[] { true });
+            Check(Math.Abs((double)textWindow.GetAnimationBaseValue(UIElement.OpacityProperty) - .5) < .01 && textWindow.HasAnimatedProperties, "editing end fades back to the saved transparency by default");
+            host.Library.Catalog.Settings.RestoreOpacityAfterEditing = true; textWindow.Opacity = 1; applyOpacity.Invoke(textWindow, new object[] { true });
+            Check(Math.Abs(textWindow.Opacity - .5) < .01, "no-fade setting restores transparency immediately");
+            host.Library.Catalog.Settings.RestoreOpacityAfterEditing = false;
             opacityMenu.Items.OfType<System.Windows.Controls.MenuItem>().First(m => m.Header.ToString() == "100%").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.MenuItem.ClickEvent));
             Check(textNote.Opacity == 1, "opacity menu can restore full opacity");
             var opacityProbe = new Window { WindowStyle = WindowStyle.None, AllowsTransparency = true, Width = 10, Height = 10, Opacity = .5, ShowInTaskbar = false, ShowActivated = false, Left = -10000, Top = -10000 };
@@ -358,6 +383,14 @@ namespace DeskPins.Tests
             Check(Math.Abs(snapWindow.Left - (workArea.Left + 4)) < .1, "Alt suppresses release snap");
             LayoutTests(host, manager, first);
             manager.Close();
+        }
+        private static System.Collections.Generic.IEnumerable<System.Windows.Controls.MenuItem> MenuItems(System.Collections.IEnumerable items)
+        {
+            foreach (var item in items.OfType<System.Windows.Controls.MenuItem>())
+            {
+                yield return item;
+                foreach (var child in MenuItems(item.Items)) yield return child;
+            }
         }
         private static System.Collections.Generic.IEnumerable<DependencyObject> Descendants(DependencyObject root)
         {
@@ -505,17 +538,35 @@ namespace DeskPins.Tests
             simpleControls.OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c).StartsWith("分钟数")).Text = "15";
             var before = DateTime.UtcNow; simpleControls.OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "确定").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); Check(scheduled.State == NoteState.Sleeping && scheduled.WakeUtc >= before.AddMinutes(15) && scheduled.WakeUtc <= DateTime.UtcNow.AddMinutes(15), "relative reminder commits correct future wake time");
             var clearSleep = new ScheduleWindow(host, scheduled, true, false); Descendants((DependencyObject)clearSleep.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "清除").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); Check(scheduled.State == NoteState.Desktop && scheduled.WakeUtc == null, "clearing sleep restores desktop state");
-            var untouched = new ScheduleWindow(host, scheduled, true, false); Descendants((DependencyObject)untouched.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "取消").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); Check(scheduled.State == NoteState.Desktop && scheduled.WakeUtc == null, "cancel reminder leaves note unchanged");
+            var untouched = new ScheduleWindow(host, scheduled, true, false); var untouchedControls = Descendants((DependencyObject)untouched.Content).ToArray();
+            Check(!untouchedControls.OfType<System.Windows.Controls.TextBlock>().Any(t => t.Text == Ui.Text("现有提醒")) && !untouchedControls.OfType<System.Windows.Controls.Button>().Any(b => b.Content?.ToString() == Ui.Text("清除")), "empty sleep reminder hides the current-reminder section");
+            untouchedControls.OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "取消").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); Check(scheduled.State == NoteState.Desktop && scheduled.WakeUtc == null, "cancel reminder leaves note unchanged");
+            var emptyAlarm = new ScheduleWindow(host, scheduled, false, false); Check(!Descendants((DependencyObject)emptyAlarm.Content).OfType<System.Windows.Controls.Button>().Any(b => b.Content?.ToString() == Ui.Text("清除")), "empty alarm hides the clear action"); emptyAlarm.Close();
+            scheduled.AlarmUtc = DateTime.UtcNow.AddHours(1); var existingAlarm = new ScheduleWindow(host, scheduled, false, false); Descendants((DependencyObject)existingAlarm.Content).OfType<System.Windows.Controls.Button>().Single(b => b.Content?.ToString() == Ui.Text("清除")).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); Check(scheduled.AlarmUtc == null, "existing alarm retains its clear action");
             var transferFile = host.Library.Catalog.Settings.TransferFile; host.Library.Catalog.Settings.TransferFile = ""; var configuration = new SettingsWindow(host); host.Library.Catalog.Settings.TransferFile = transferFile;
             Check(configuration.ShowInTaskbar, "settings window is independent and visible in the taskbar");
             var navigation = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.ListBox>().Single();
             Check(navigation.Items.Count == 9, "settings uses a nine-category navigation rail");
+            var navigationTemplate = navigation.ItemContainerStyle.Setters.OfType<System.Windows.Setter>().Where(s => s.Property == System.Windows.Controls.Control.TemplateProperty).Select(s => s.Value).OfType<System.Windows.Controls.ControlTemplate>().Single();
+            Check(navigationTemplate.Triggers.OfType<System.Windows.Trigger>().Any(t => t.Property == UIElement.IsKeyboardFocusedProperty), "settings navigation has a visible keyboard-focus trigger");
+            Layout(configuration, 900, 640, "settings-application-labels");
+            var backupLabel = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TextBlock>().Single(t => t.Text == Ui.Text("自动备份间隔（小时，0=关闭）"));
+            Check(backupLabel.ActualHeight <= 22, "settings labels avoid orphaned wrapped characters at the default width");
             for (int i = 0; i < navigation.Items.Count; i++) { navigation.SelectedIndex = i; Layout(configuration, 900, 640, "settings-" + i); }
             Check(Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "取消").IsCancel, "settings supports Escape cancel");
             Layout(configuration, 900, 640, "settings-data");
             var dataButtons = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Button>().Select(c => c.Content?.ToString()).ToArray();
             Check(dataButtons.Contains("备份…") && dataButtons.Contains("恢复全部…") && dataButtons.Contains("导入便签…") && dataButtons.Contains("救回屏幕外便签"), "settings data page owns import and recovery actions");
             navigation.SelectedIndex = 1;
+            var settingsDraft = Field<Settings>(configuration, "settings");
+            var startToggle = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Primitives.ToggleButton>().Single(t => System.Windows.Automation.AutomationProperties.GetName(t) == Ui.Text("启动时隐藏全部便签"));
+            Check(startToggle.Template.Triggers.OfType<System.Windows.Trigger>().Any(t => t.Property == UIElement.IsKeyboardFocusedProperty), "settings switches have a visible keyboard-focus trigger");
+            var startRow = (System.Windows.Controls.DockPanel)startToggle.Parent; bool startHidden = settingsDraft.StartHidden;
+            startRow.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+            Check(settingsDraft.StartHidden != startHidden && startToggle.IsChecked == settingsDraft.StartHidden, "clicking a switch label or row toggles the setting once");
+            startToggle.IsEnabled = false; startHidden = settingsDraft.StartHidden;
+            startRow.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+            Check(settingsDraft.StartHidden == startHidden, "disabled switch rows do not respond to clicks"); startToggle.IsEnabled = true;
             var snapBox = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TextBox>().Single(c => System.Windows.Automation.AutomationProperties.GetName(c) == "吸附距离");
             snapBox.Text = "invalid";
             navigation.SelectedIndex = 8; navigation.SelectedIndex = 1;
@@ -550,6 +601,9 @@ namespace DeskPins.Tests
             hotkeyTabs.SelectedIndex = 0; Layout(configuration, 900, 640, "settings-hotkeys-global");
             Check(Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Primitives.ToggleButton>().Any(c => object.Equals(c.Tag, "global-manage")), "global manage shortcut can be configured");
             hotkeyTabs.SelectedIndex = 1; Layout(configuration, 900, 640, "settings-hotkeys-app");
+            var shortcutSearchBox = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TextBox>().Single(t => System.Windows.Automation.AutomationProperties.GetName(t) == Ui.Text("搜索快捷键名称或按键"));
+            var shortcutSearchLabel = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TextBlock>().Single(t => t.Text == Ui.Text("搜索快捷键名称或按键"));
+            Check(shortcutSearchLabel.TranslatePoint(new Point(0, shortcutSearchLabel.ActualHeight), (UIElement)configuration.Content).Y <= shortcutSearchBox.TranslatePoint(new Point(), (UIElement)configuration.Content).Y + .5, "shortcut search has a persistent label above the input");
             var draft = Field<Settings>(configuration, "settings");
             var newToggle = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.Primitives.ToggleButton>().FirstOrDefault(c => object.Equals(c.Tag, "new"));
             var newKey = Descendants((DependencyObject)configuration.Content).OfType<System.Windows.Controls.TextBox>().FirstOrDefault(c => object.Equals(c.Tag, "new"));
@@ -593,7 +647,7 @@ namespace DeskPins.Tests
             host.Library.Catalog.Settings.Language = restoredLanguage; Ui.LoadLanguage(restoredLanguage); reloadConfiguration.Close();
             foreach (var kind in new[] { "folders", "friends", "tags" }) { var collection = new CollectionsWindow(host, kind); Layout(collection, 444, 280, "collection-" + kind); Check(Descendants((DependencyObject)collection.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "关闭").IsCancel, "collection keyboard close " + kind); collection.Close(); }
             var attachment = new AttachWindow(host, note); Descendants((DependencyObject)attachment.Content).OfType<System.Windows.Controls.ListBox>().Single().ItemsSource = new[] { new WindowInfo { Title = "Sample document — Editor", Class = "SampleEditor" } }; Layout(attachment, 524, 360, "attachment"); Check(Descendants((DependencyObject)attachment.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "确定").IsDefault, "attachment supports Enter confirm");
-            var calendarHost = Field<System.Windows.Controls.Border>(manager, "calendarHost"); for (int category = 0; category <= 10; category++) { SelectCategory(categories, category); Layout(manager, 900, 520, "manager-category-" + category); Check(category == 0 ? homeView.ActualWidth >= 500 : notes.ActualWidth >= 200 && preview.ActualWidth >= 200, "minimum manager layout in category " + category); if (category == 1) { typeof(ManagerWindow).GetMethod("ApplyThinScrollBars", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(manager, null); manager.UpdateLayout(); var bar = VisualDescendants((DependencyObject)notes).OfType<System.Windows.Controls.Primitives.ScrollBar>().FirstOrDefault(b => b.Orientation == System.Windows.Controls.Orientation.Vertical); Check(bar != null && bar.ActualWidth > 0 && bar.ActualWidth <= 7, "manager list scrollbar is thin"); } if (category == 6) { Check(notes.ActualHeight >= 120, "calendar keeps a usable note list at minimum size"); Check(calendarHost.ActualHeight <= 240, "compact calendar leaves room for the note list"); var lastDay = Descendants(calendarHost).OfType<System.Windows.Controls.Button>().Where(b => b.Tag is DateTime).OrderBy(b => (DateTime)b.Tag).Last(); Check(lastDay.TranslatePoint(new Point(0, lastDay.ActualHeight), calendarHost).Y <= calendarHost.ActualHeight + .5, "calendar shows the complete month without clipping"); } }
+            var calendarHost = Field<System.Windows.Controls.Border>(manager, "calendarHost"); for (int category = 0; category <= 10; category++) { SelectCategory(categories, category); Layout(manager, 900, 520, "manager-category-" + category); Check(category == 0 ? homeView.ActualWidth >= 500 : notes.ActualWidth >= 200 && preview.ActualWidth >= 200, "minimum manager layout in category " + category); if (category == 1) { typeof(ManagerWindow).GetMethod("ApplyThinScrollBars", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(manager, null); manager.UpdateLayout(); var bar = VisualDescendants((DependencyObject)notes).OfType<System.Windows.Controls.Primitives.ScrollBar>().FirstOrDefault(b => b.Orientation == System.Windows.Controls.Orientation.Vertical); Check(bar != null && Math.Abs(bar.ActualWidth - 11) < .1, "manager list scrollbar has an 11px hit target"); } if (category == 6) { Check(notes.ActualHeight >= 120, "calendar keeps a usable note list at minimum size"); Check(calendarHost.ActualHeight <= 240, "compact calendar leaves room for the note list"); var lastDay = Descendants(calendarHost).OfType<System.Windows.Controls.Button>().Where(b => b.Tag is DateTime).OrderBy(b => (DateTime)b.Tag).Last(); Check(lastDay.TranslatePoint(new Point(0, lastDay.ActualHeight), calendarHost).Y <= calendarHost.ActualHeight + .5, "calendar shows the complete month without clipping"); } }
             var noteWindow = host.Windows.Values.First(w => w.TextEditor != null); noteWindow.TextEditor.InsertText("Sample note\n☐ Task one\n☑ Task two"); Layout(noteWindow, 260, 190, "note-text"); Check(noteWindow.TextEditor.ActualHeight > 100, "text note keeps editable body below title"); noteWindow.ToggleRoll(); Layout(noteWindow, 260, 24, "note-rolled"); noteWindow.ToggleRoll();
             var imageWindow = host.Windows.Values.First(w => w.ImageEditor != null); Layout(imageWindow, 260, 190, "note-image"); Check(imageWindow.ImageEditor.ActualWidth >= 250, "image note keeps canvas scrollable");
             var stack = new StackWindow(host, new NoteStack { Name = "Sample stack with a long title that must be trimmed", Width = 240, Height = 60 }); stack.Refresh(); Check(Math.Abs(stack.Width - 240) < .1 && Math.Abs(stack.Height - 60) < .1, "stack window restores its saved size"); Layout(stack, 240, 60, "stack"); stack.Close();
@@ -605,7 +659,7 @@ namespace DeskPins.Tests
             Check(Descendants((DependencyObject)about.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "关闭").IsCancel, "about supports Escape close");
             Layout(about, 480, 220, "about"); about.Close();
             SelectCategory(categories, 8); manager.Refresh();
-            Ui.LoadLanguage("en-US"); var englishManager = new ManagerWindow(host); Layout(englishManager, 900, 520, "manager-en"); Check(Field<System.Windows.Controls.ListBox>(englishManager, "categories").Items.Cast<System.Windows.Controls.ListBoxItem>().Any(i => ((System.Windows.Controls.StackPanel)i.Content).Children.OfType<System.Windows.Controls.TextBlock>().Last().Text == "Search"), "manager icon rail localizes captions"); englishManager.Close(); Ui.LoadLanguage("zh-CN");
+            Ui.LoadLanguage("en-US"); var englishManager = new ManagerWindow(host); Layout(englishManager, 900, 520, "manager-en"); var englishRailCaptions = Field<System.Windows.Controls.ListBox>(englishManager, "categories").Items.Cast<System.Windows.Controls.ListBoxItem>().Select(i => ((System.Windows.Controls.StackPanel)i.Content).Children.OfType<System.Windows.Controls.TextBlock>().Last()).ToArray(); Check(englishRailCaptions.Any(t => t.Text == "Search results"), "manager icon rail localizes captions"); var attachmentCaption = englishRailCaptions.Single(t => t.Text == "Attachments"); var attachmentMeasure = new System.Windows.Media.FormattedText(attachmentCaption.Text, System.Globalization.CultureInfo.GetCultureInfo("en-US"), FlowDirection.LeftToRight, new System.Windows.Media.Typeface("Segoe UI"), attachmentCaption.FontSize, System.Windows.Media.Brushes.Black, 1.0); Check(attachmentCaption.ActualWidth + .5 >= attachmentMeasure.WidthIncludingTrailingWhitespace, "manager icon rail fits long English labels (actual " + attachmentCaption.ActualWidth + ", needed " + attachmentMeasure.WidthIncludingTrailingWhitespace + ")"); englishManager.Close(); Ui.LoadLanguage("zh-CN");
             reminder.Close(); configuration.Close(); attachment.Close();
         }
     }

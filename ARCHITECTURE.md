@@ -85,7 +85,7 @@ WPF 便签 / 管理 / 设置
 | 关于窗口 | AboutWindow 构造 / VersionText、AppHost.BuildTray 的“关于 DeskPins”菜单项 |
 | 公共弹框 / 按钮 / 菜单 | UiTheme.Apply / ButtonStyle / ComboBoxStyle、Ui.DialogContent / FitDialog / ActiveWindow / PrimaryButton / DangerButton / Item；NoteWindow.Menu / TextMenu / ImageMenu |
 | 状态转换 / 加密 / 重载 | NoteLibrary.Move / Sleep / Load / Save / SetFolderEncrypted / Reload |
-| 管理布局与预览 | ManagerWindow.Refresh / DisplaySelected / OpenSelected / RestoreSelected / UpdateSelectionSummary / ConstrainPaneWidths / SavePaneWidths / ResizeOutlinePane / PaneSplitter / SelectCategory / ScrollRailToSelection / IconButton |
+| 管理布局与预览 | ManagerWindow.Refresh / DisplaySelected / OpenSelected / RestoreSelected / UpdateSelectionSummary / ConstrainPaneWidths / SavePaneWidths / ResizeOutlinePane / PaneSplitter / SelectCategory / ScrollRailToSelection / QueueThinScrollBars / IconButton |
 | 管理编辑 / 菜单 / 状态 | ManagerWindow.SaveEditor / FlushPending / EditNoteTitle / BeginInlineTitleEdit / ShowNoteProperties / Context / SaveManagerState / RestoreManagerState |
 | 管理导航与集合 | ManagerWindow.BuildTree / CreateCollectionItem / BeginInlineCollectionRename / EditCollection / DeleteCollection / MoveCollectionItem / NewNoteIn / DropTo / NodeDrop |
 | 管理器日历 | ManagerWindow.BuildCalendar / BuildCalendarView / CalendarDay / FocusCalendarDate / MatchesDate |
@@ -119,8 +119,8 @@ WPF 便签 / 管理 / 设置
 - 便签标题拖动期间 MoveSelected 只同步组内窗口；DragMove 返回后才由 SnapAfterDrag 按屏幕 / 其他便签边缘吸附，避免连续吸附把小幅拖动拉回原位。SnapAfterDrag 移动全部选中窗口；按住 Alt 反向切换吸附。
 - 堆叠窗口读取 NoteStack.Topmost，AppHost.NewStack 沿用来源便签的 Topmost；窗口设置 ShowActivated=false。选中或激活便签时 AppHost.BringStacksForward 用 SetWindowPos(NOACTIVATE) 把全部堆叠抬到最前，确保未置顶堆叠被其他窗口遮盖后仍可见。
 - TextEditor 在 FlowDocument.Resources 注入 Paragraph Margin=0 隐式样式，并在 Read / TextChanged 归一化段落边距，避免 Paragraph 自动边距形成多余空行。
-- NoteWindow 的 OpaqueEditing 只对活动便签强制不透明；用户从右键改透明度或应用样式时 showOpacity 临时绕过，失焦后清除，保证改动立即可见。
-- 管理便签为 60px 图标 + 小字导轨与动态工作区：导轨项是 30px 图标 + 居中 9px 浅色说明（分类 10 固定显示 Search），Tag 保存稳定分类 id；Stored / Stacks / Tags 显示大纲 + 卡片列表 + 内容三栏，其余分类显示卡片列表 + 内容两栏，Home 为仪表盘。导轨视觉顺序由 CategoryOrder 决定，不要用 SelectedIndex 当分类 id。列表头部第 1 行是分类标题 + 右对齐计数，第 2 行是图标操作组 + 右对齐排序下拉（宽度按最长文案 80–96px）；预览元信息与操作按钮同一行、按钮靠右。大纲列首次访问使用星号 Fill，之后按分类保存的像素宽度恢复；窗口变宽时未拖拽的首次布局与预览分担剩余空间。三条集合分类的大纲选中行使用 Selected 浅色背景。管理器滚动条统一压到 6px。树 / 列表计数写入快照，避免预览保存时反复清空选择。ScrollRailToSelection 在筛选、搜索栏展开或导轨尺寸变化后把当前分类滚入可见。
+- NoteWindow 的 OpaqueEditing 只对活动便签强制不透明；用户从右键改透明度或应用样式时 showOpacity 临时绕过，失焦后清除。RestoreOpacityAfterEditing 决定失焦立即恢复还是以 180ms 淡出恢复保存的透明度。
+- 管理便签为 88px 图标 + 小字导轨与动态工作区：30px 图标下是居中 11px 说明，英文长标签保留至少 68px 文字宽度，分类 10 使用本地化“搜索结果”；Tag 保存稳定分类 id。桌面排除附着 / 堆叠，附着分类显示全部 Attachment != null（含当前可见项）。Home 每行保留分类文字，合计按唯一便签 Id 去重。卡片日期固定为“修改于 + ModifiedUtc”。Stored / Stacks / Tags 显示大纲 + 卡片列表 + 内容三栏，其余分类显示卡片列表 + 内容两栏，Home 为仪表盘；预览分栏 MinWidth=245，保证最小窗口仍有内容空间。导轨视觉顺序由 CategoryOrder 决定，不要用 SelectedIndex 当分类 id。列表头部第 1 行是分类标题 + 右对齐计数，第 2 行是图标操作组 + 右对齐排序下拉（宽度按最长文案 80–96px）；预览元信息与操作按钮同一行、按钮靠右。大纲列首次访问使用星号 Fill，之后按分类保存的像素宽度恢复；窗口变宽时未拖拽的首次布局与预览分担剩余空间。三条集合分类的大纲选中行使用 Selected 浅色背景。管理器滚动条统一为 11px，Loaded / Refresh / DisplaySelected 后由 QueueThinScrollBars 合并扫描实际 ScrollBar，不再用 LayoutUpdated 全树扫描。树 / 列表计数写入快照，避免预览保存时反复清空选择。ScrollRailToSelection 在筛选、搜索栏展开或导轨尺寸变化后把当前分类滚入可见。
 - 第一分隔条使用自定义 Thumb + ResizeOutlinePane，只同时调整大纲和列表且保持两者总宽不变，第二分隔条与预览不动；大纲最小 100px、列表最小 260px。第二分隔条仍用 GridSplitter 调整列表与预览。不要换回两个 GridSplitter 的 PreviousAndNext 组合，否则拖动第一条时第二条会跟着移动。
 - 集合大纲由 Catalog 列表顺序驱动，三个集合分类都有 Tag="all" 的“全部”节点，选中后清空筛选且禁用属性 / 删除。拖拽排序移动 Folders / Stacks / Tags 列表项；文件夹节点上 / 下 1/4 排序，中间 1/2 改 ParentId，禁止自身 / 后代。DeskPins.Collection 与 DeskPins.Notes 分流；属性走 CollectionEditor，行内改名走 BeginInlineCollectionRename，删除后清筛选并重建树。
 - 日历由 ManagerWindow.Calendar 自绘，月份 / 星期按 Ui.CurrentLanguage 本地化，计数和列表共用 MatchesDate。月历固定为紧凑 6 周并直接放入日历宿主，不嵌套 ScrollViewer；CalendarDay 支持方向键、PageUp / PageDown 和 Home，FocusCalendarDate 恢复焦点。
@@ -131,14 +131,14 @@ WPF 便签 / 管理 / 设置
 - 恢复提交后的 Reload 失败不回滚已提交数据库：AppHost 标记 storageFailed / Exiting、停计时器并关闭 Repository，阻断旧数据写入；Exit 走无保存退出分支，管理器关闭 / 自动保存通过 StorageFailed 跳过旧内存保存。
 - 数据目录：ValidateDataDirectory 只检查路径与已有库，不创建目录 / 数据库 / 指针；ApplyDataDirectory 对空目标用 SQLite Backup 复制，对已有库只切换，再写指针供重启。SettingsWindow 只在 pendingDataDirectory 不同于成功应用基线时调用；选回当前运行目录也必须更新指针。
 - 快捷键统一走 Ui.TryParseGesture / FormatGesture：支持无修饰普通键与 F1–F24；全局快捷键保存时必须带修饰键或功能键。全局新建 / 显隐 / 管理分别注册 HotKey ID 1 / 2 / 3；其中管理是 toggle：管理器前台时关闭，后台或未打开时打开。
-- 公共弹框：Ui.DialogContent 提供滚动正文与固定按钮页脚，FitDialog 限工作区并为非任务栏窗口补活动 Owner；PrimaryButton / DangerButton 区分主要 / 危险动作，确认默认 No。输入框在 Loaded 后 Dispatcher 聚焦 / 全选；集合、联系人、提醒、附着验证失败定位字段，危险动作独立并明确后果。
-- 菜单按需生成：Ui.Item 接收 check / enabled；NoteWindow.Menu 标明关闭可恢复、永久删除及传输后关闭，TextMenu / ImageMenu 按锁定、选择、剪贴板和 CanUndo / CanRedo 启停相应操作。BuildTray 分新建、显隐 / 管理、工具与退出组；数据维护只在设置页。
-- 设置表单：Appearance 使用样式下拉 + 颜色 / 字体 / 透明度 / Tab 宽度 / 示例 / 阴影 / 皮肤；Content 管理链接、复选框、Shift+Ctrl 方向、7 个高亮色和图片行为；Alerts 管理唤醒默认值、声音文件与响铃；Desktop 管理启动隐藏、关闭确认、吸附距离 / 间隙和双击标题栏行为。
+- 公共弹框：Ui.DialogContent 提供滚动正文与固定按钮页脚，FitDialog 限工作区并为非任务栏窗口补活动 Owner；PrimaryButton / DangerButton 区分主要 / 危险动作，确认默认 No。输入框在 Loaded 后 Dispatcher 聚焦 / 全选；集合、联系人、提醒、附着验证失败定位字段，危险动作独立并明确后果。ScheduleWindow 仅对已有休眠 / 重复或闹钟显示“现有提醒”清除区。
+- 菜单按需生成：Ui.Item 接收 check / enabled；NoteWindow.Menu 首层保留常用操作，将整理、显示行为、导出传输分别收进二级菜单并保留快捷键，仍标明关闭可恢复、永久删除及传输后关闭；Alt+F4 只关闭当前便签（进入 Closed），不退出应用。TextMenu / ImageMenu 按锁定、选择、剪贴板和 CanUndo / CanRedo 启停相应操作。BuildTray 分新建、显隐 / 管理、工具与退出组；数据维护只在设置页。
+- 设置表单：Appearance 使用样式下拉 + 颜色 / 字体 / 透明度 / Tab 宽度 / 示例 / 阴影 / 皮肤；Content 管理链接、复选框、Shift+Ctrl 方向、7 个高亮色和图片行为；Alerts 管理唤醒默认值、声音文件与响铃；Desktop 管理启动隐藏、关闭确认、吸附距离 / 间隙和双击标题栏行为。快捷键搜索有持久可见标签；设置标签列 220px，开关整行可点击且文字不重复触发，导航与开关模板提供键盘焦点反馈。
 
 ## 4. 接口契约
 
 - Note：序列化元数据与非序列化 Body / PlainText 分离；Id 是 GUID 字符串，创建新身份用 Clone。State 只有 Desktop / Closed / Stored / Sleeping / Recurring，附着与堆叠为独立字段。
-- Note 的管理器展示字段：ManagerTitle 在 Closed 分类显示 `id <ShortId> <标题>`（ShortId 取 Id 前 8 位，完整 Id 在 Identifier / 卡片 ToolTip）；DisplayTags 是 Refresh 时从 Catalog.Tags 解析出的 Tag 列表，仅供 WPF 绑定。WPF 绑定只认属性，不认字段。
+- Note 的管理器展示字段：ManagerTitle 在 Closed 分类显示 `id <ShortId> <标题>`（ShortId 取 Id 前 8 位，完整 Id 在 Identifier / 卡片 ToolTip）；DisplayTags 是 Refresh 时从 Catalog.Tags 解析出的 Tag 列表，仅供 WPF 绑定。DateLabel 固定使用 ModifiedUtc，DateLabelPrefix 由 App 层注入本地化“修改于”，Core 不引用 Ui。WPF 绑定只认属性，不认字段。
 - 集合顺序即 Catalog.Folders / Stacks / Tags 的列表顺序；ManagerOrder 等字典仍按稳定分类 id 保存。Folder.ParentId 决定层级，拖动排序时先调整列表顺序再写 ParentId。
 - Note 的卷起独立位置使用 ExpandedLeft / ExpandedTop / RolledLeft / RolledTop 可空字段；只有 Settings.RolledDifferentPosition 打开时才读写。
 - NoteStack：Left / Top / Width / Height 均持久化；旧数据缺尺寸时 Catalog.Normalize 补 180×44，最小 100×32。
@@ -200,12 +200,13 @@ WPF 便签 / 管理 / 设置
 - 设置窗口必须是非模态任务栏窗口（ShowInTaskbar=true + Show）；ShowDialog / Owner 会让便签无法编辑和选中。
 - 自动吸附只在 DragMove 返回后执行；不要在 MouseMove 中实时吸附加回窗口，否则小幅拖动会看起来“拖不动”。
 - Paragraph 的 Margin 可能是 Auto 或由 RTF 显式带入；TextEditor 必须用隐式样式和归一化保持 0，否则会出现多余空行。
-- 堆叠窗口 ShowActivated=false，前置用 SetWindowPos(NOACTIVATE)，不能抢走便签焦点；NoteWindow 的 OpaqueEditing 对活动窗口强制不透明，用户显式改透明度时用 showOpacity 临时绕过。
+- 堆叠窗口 ShowActivated=false，前置用 SetWindowPos(NOACTIVATE)，不能抢走便签焦点；NoteWindow 的 OpaqueEditing 对活动窗口强制不透明，用户显式改透明度时用 showOpacity 临时绕过。失焦恢复透明前清除旧 Opacity 动画；RestoreOpacityAfterEditing=false 使用 180ms 淡出，true 立即恢复，不要让设置只保存而不参与运行行为。
 - 数据目录是启动级配置，不替换运行 Repository。预检只读，不保证可写；保存后空目标复制，已有库不覆盖。目录是否需应用比较成功写指针基线而非运行目录；从 B 选回运行目录 A 仍要写指针，无变化保存不得写指针。
 - 设置提交与外部应用不是一个事务：Catalog 成功后开机启动 / 目录 / 热键 / 网络等仍可能失败，必须分别报告并允许重试，取消不撤销提交；恢复 / 导入 / 维护不以取消设置回滚。
 - 恢复前必须确认同 Id 覆盖并创建唯一保护备份。Reload 在完整读取前不能清内存；提交后重载失败必须 storageFailed / Exiting、关闭 Repository 阻断旧写，不能把应用失败说成恢复未提交。
 - StorageFailed 是恢复提交后重载失败的写阻断状态：Repository 关闭阻断所有数据库写入，ManagerWindow.Closing / SaveEditor 跳过保存；AppHost.Dispose 以 CloseInternal(false) 关闭便签，Exit 仍允许无保存退出。
 - UiTheme 只覆盖工具窗口，便签正文与堆叠保留用户色彩；不要向 Application 注入隐式输入样式。FitDialog 对非任务栏窗口补 Owner，设置窗口必须保持 ShowInTaskbar=true / 无 Owner；按钮 / 菜单的启停与明确文案不能代替处理函数的安全检查。
+- 自定义便签背景的前景色由 Ui.TextOn 按 WCAG 相对亮度分别比较黑 / 白对比度，不能用简单亮度阈值；标题栏固定配色也要分别验证活动 / 失焦背景上的文字对比度。
 - 托盘不再承载导入 / 备份 / 恢复 / 救回；这些操作只在设置-数据页，避免两套入口行为漂移。BuildTrayMenu 独立构造、不显示图标，供 testMode 回归；菜单只能向 ShortcutFor 查询 DefaultShortcuts 已登记动作，截屏无快捷键不查询，新建提示读取 GlobalNewKey。
 - 管理便签的内容区是独立第三栏（Home 除外），不要恢复旧的“列表占满 + 隐藏预览”结构；BuildTree 必须把计数纳入快照，否则预览保存会清空选择。
 - 管理便签的工作区是分类相关布局：不要在所有分类常驻 Stored folders / Stacks / Tags 大纲；只有 2 / 8 / 9 显示大纲，Home 显示仪表盘，其余显示列表 + 内容。第一分隔条必须保持大纲+列表总宽不变（自定义 Thumb），第二分隔条独立调整列表与预览；大纲最小 100px、列表最小 260px。分隔条宽度按分类读取 / 保存 ManagerOutlineWidths / ManagerListWidths，保存时不要覆盖其他分类。
@@ -214,7 +215,7 @@ WPF 便签 / 管理 / 设置
 - WPF 绑定不读公共字段。管理器卡片新增展示字段时用属性（如 ManagerTitle / Identifier / DisplayTags、Tag.DisplayName / ColorHex），字段只用于序列化或内部计算。
 - 日历与搜索是同一套筛选的两处呈现：日格计数与日历列表必须共用 MatchesDate；搜索的范围 / 标签 / 正文开关必须同时作用于 SearchResults，不要在 Refresh 的 switch 里另外拼一套条件。月历不要套内部 ScrollViewer：用 26px 日格和 32px 月份栏固定 6 周，最小窗口仍要让便签列表 ≥120px。
 - 管理器操作按钮统一用 IconButton（32×30、图标 + ToolTip + 自动化名称），不要恢复尺寸不一的文字按钮组；空态 CTA 与搜索按钮保留文字，查找栏重置/展开使用图标。排序下拉必须使用 UiTheme.ComboBoxStyle（平面边框、居中文本、自绘 Popup 和菜单项），否则会退回系统灰色下拉样式；新增操作时同时检查列表、大纲、预览三行是否各自单行对齐。
-- ScrollViewer 默认模板会给 ScrollBar 写入系统 17px 宽度，单靠隐式 Style 的 Width setter 不生效；ManagerWindow.ApplyThinScrollBars 在 Loaded / LayoutUpdated 后把实际 ScrollBar 的 Width / Height 设为 6px。不要把“细滚动条”只做成 UiTheme 样式而不验证 ActualWidth。
+- ScrollViewer 默认模板会给 ScrollBar 写入系统 17px 宽度，单靠隐式 Style 的 Width setter 不生效；ManagerWindow.ApplyThinScrollBars 把实际 ScrollBar 的 Width / Height 设为 11px，QueueThinScrollBars 只在 Loaded / Refresh / DisplaySelected 后合并调度，避免 LayoutUpdated 每次布局都全树扫描。不要把“细滚动条”只做成 UiTheme 样式而不验证 ActualWidth。
 - 分类宽度 / 选中 / 筛选在切换前由 SaveCategoryState 写入 Settings，切换后再 RestoreCategoryState / RefreshCore 恢复；只靠关闭时 SaveManagerState 会导致切回分类重置。首次访问无保存宽度才 Fill，之后恢复像素值。
 - 管理器的集合大纲使用自定义 TreeViewItem 模板：默认模板的系统选中色会覆盖样式 Background，必须由模板的 Bd 触发器绘制 Selected 浅色背景；展开按钮绑定 IsExpanded，叶子节点隐藏。显式创建的 TreeViewItem 也要赋 Style（只设 ItemContainerStyle 不够），否则子目录会用默认模板导致计数列不对齐；缩进通过每层 Padding 实现，ItemsPresenter 不再加左边距，计数才能统一贴右。不要只改 ItemContainerStyle 的 Background 就宣称选中色已改。
 - 快捷键格式不要只用 KeyGestureConverter：它拒绝无修饰的普通字符键。统一使用 Ui.TryParseGesture / FormatGesture；全局快捷键必须带修饰键或功能键。

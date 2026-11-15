@@ -26,7 +26,19 @@ namespace DeskPins.App
         private static DropShadowEffect CreateNoteShadow() { var effect = new DropShadowEffect { BlurRadius = 10, ShadowDepth = 0, Direction = 270, Opacity = .32, Color = Colors.Black }; effect.Freeze(); return effect; }
         public static Effect NoteShadow(bool enabled) { return enabled ? noteShadow : null; }
         public static Brush Brush(string color) { Brush cached; if (color != null && brushCache.TryGetValue(color, out cached)) return cached; try { var b = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color)); b.Freeze(); brushCache[color] = b; return b; } catch { return Brushes.LightYellow; } }
-        public static Brush TextOn(string color) { try { var c = (Color)ColorConverter.ConvertFromString(color); return .299 * c.R + .587 * c.G + .114 * c.B > 150 ? Brushes.Black : Brushes.White; } catch { return Brushes.Black; } }
+        public static Brush TextOn(string color)
+        {
+            try
+            {
+                var luminance = RelativeLuminance((Color)ColorConverter.ConvertFromString(color));
+                var blackContrast = (luminance + .05) / .05;
+                var whiteContrast = 1.05 / (luminance + .05);
+                return blackContrast >= whiteContrast ? Brushes.Black : Brushes.White;
+            }
+            catch { return Brushes.Black; }
+        }
+        private static double RelativeLuminance(Color color) { return .2126 * LinearChannel(color.R) + .7152 * LinearChannel(color.G) + .0722 * LinearChannel(color.B); }
+        private static double LinearChannel(byte value) { var channel = value / 255d; return channel <= .04045 ? channel / 12.92 : Math.Pow((channel + .055) / 1.055, 2.4); }
         public static Button Button(string text, Action click, double width = double.NaN) { return CreateButton(text, click, width, false, false); }
         public static Button PrimaryButton(string text, Action click, double width = double.NaN) { return CreateButton(text, click, width, true, false); }
         public static Button DangerButton(string text, Action click, double width = double.NaN) { return CreateButton(text, click, width, false, true); }

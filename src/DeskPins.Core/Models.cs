@@ -46,8 +46,8 @@ namespace DeskPins.Core
         [IgnoreDataMember] public bool CompactPreview;
         [IgnoreDataMember] public string ColorHex { get { return Color; } }
         public string DisplayPreview { get { return CompactPreview ? "" : Preview; } }
-        [IgnoreDataMember] public bool DisplayModifiedDates;
-        public string DateLabel { get { var date = DisplayModifiedDates ? ModifiedUtc : State == NoteState.Sleeping || State == NoteState.Recurring ? WakeUtc ?? StateUtc : State == NoteState.Stored || State == NoteState.Closed ? StateUtc : CreatedUtc; return date.ToLocalTime().ToString("yyyy-MM-dd HH:mm"); } }
+        [IgnoreDataMember] public string DateLabelPrefix { get; set; } = "";
+        public string DateLabel { get { var date = ModifiedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"); return string.IsNullOrEmpty(DateLabelPrefix) ? date : DateLabelPrefix + " " + date; } }
         public Note Clone()
         {
             var clone = Json.Read<Note>(Json.Bytes(this));
@@ -125,7 +125,6 @@ namespace DeskPins.Core
         [DataMember] public List<NoteStyle> Styles = new List<NoteStyle>();
         [DataMember] public Dictionary<string, string> Shortcuts = new Dictionary<string, string>();
         [DataMember] public Dictionary<string, string> DisabledShortcuts = new Dictionary<string, string>();
-        [DataMember] public bool ManagerModifiedDates;
         [DataMember] public bool EmailViaClient;
         [DataMember] public Dictionary<int, int> ManagerOrders = new Dictionary<int, int>();
         [DataMember] public Dictionary<int, double> ManagerOutlineWidths = new Dictionary<int, double>();

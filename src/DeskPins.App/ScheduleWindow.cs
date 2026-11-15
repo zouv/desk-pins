@@ -56,16 +56,19 @@ namespace DeskPins.App
             var alarm = new CheckBox { Content = Ui.Text("唤醒时触发闹钟"), IsChecked = note.WakeAlarm, Margin = new Thickness(4) };
             var sound = new CheckBox { Content = Ui.Text("唤醒时播放声音"), IsChecked = note.WakeSound, Margin = new Thickness(4) };
             if (sleep) { panel.Children.Add(top); panel.Children.Add(alarm); panel.Children.Add(sound); }
-            var clear = Ui.DangerButton("清除", () =>
+            bool hasExisting = sleep ? note.WakeUtc.HasValue || note.Repeat != null : note.AlarmUtc.HasValue;
+            if (hasExisting)
             {
-                try { host.FlushNote(note); host.Library.Atomic(() => { if (sleep) host.Library.Move(note, NoteState.Desktop); else { note.AlarmUtc = null; host.Library.Save(note); } }); Close(); }
-                catch (Exception ex) { Ui.Error(ex, this); }
-            });
-            clear.IsEnabled = sleep ? note.WakeUtc.HasValue || note.Repeat != null : note.AlarmUtc.HasValue;
-            var existing = new StackPanel { Margin = new Thickness(2, 18, 2, 0) };
-            existing.Children.Add(new TextBlock { Text = Ui.Text("现有提醒"), FontWeight = FontWeights.SemiBold });
-            existing.Children.Add(new TextBlock { Text = Ui.Text(sleep ? "清除将取消休眠或重复提醒，并将便签移回桌面。" : "清除将移除当前闹钟。"), Foreground = UiTheme.Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 4) });
-            clear.HorizontalAlignment = HorizontalAlignment.Left; existing.Children.Add(clear); panel.Children.Add(existing);
+                var clear = Ui.DangerButton("清除", () =>
+                {
+                    try { host.FlushNote(note); host.Library.Atomic(() => { if (sleep) host.Library.Move(note, NoteState.Desktop); else { note.AlarmUtc = null; host.Library.Save(note); } }); Close(); }
+                    catch (Exception ex) { Ui.Error(ex, this); }
+                });
+                var existing = new StackPanel { Margin = new Thickness(2, 18, 2, 0) };
+                existing.Children.Add(new TextBlock { Text = Ui.Text("现有提醒"), FontWeight = FontWeights.SemiBold });
+                existing.Children.Add(new TextBlock { Text = Ui.Text(sleep ? "清除将取消休眠或重复提醒，并将便签移回桌面。" : "清除将移除当前闹钟。"), Foreground = UiTheme.Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 4) });
+                clear.HorizontalAlignment = HorizontalAlignment.Left; existing.Children.Add(clear); panel.Children.Add(existing);
+            }
             var ok = Ui.PrimaryButton("确定", () =>
             {
                 FrameworkElement invalid = mode.SelectedIndex == 1 ? (FrameworkElement)minutes : date;

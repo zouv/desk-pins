@@ -71,7 +71,7 @@ namespace DeskPins.App
             {"试试其他关键词，或重置搜索范围与标签。", "Try different keywords or reset search scopes and tags."}, {"新建便签，或从其他分类移动便签到这里。", "Create a note or move one here from another category."},
             {"重置搜索", "Reset search"}, {"选择便签查看内容", "Select a note to view its content"},
             {"正文可在这里编辑；历史便签只有执行“恢复到桌面”才会重新显示在桌面。", "Edit text here. Historical notes only reappear on the desktop after Restore to desktop."},
-            {"未知状态", "Unknown state"}, {"双击或按 F2 修改标题", "Double-click or press F2 to edit the title"}, {"修改时间", "Modified"}, {"创建时间", "Created"},
+            {"未知状态", "Unknown state"}, {"双击或按 F2 修改标题", "Double-click or press F2 to edit the title"}, {"修改时间", "Modified"}, {"修改于", "Modified"}, {"创建时间", "Created"},
             {"重试保存", "Retry save"}, {"设置提醒…", "Set reminder…"}, {"设置附着…", "Set attachment…"},
             {"正文可编辑，停止输入后自动保存。", "Text is editable and saves automatically after you stop typing."}, {"图片仅预览；在桌面便签中编辑图片。", "Image preview only. Edit the image in its desktop note."},
             {"有未保存的修改…", "Unsaved changes…"}, {"已自动保存", "Saved automatically"}, {"保存失败；修改仍保留，请重试保存。", "Save failed. Your changes are retained; retry saving."}, {"无法加载便签内容", "Unable to load note content"},
@@ -216,7 +216,8 @@ namespace DeskPins.App
 
             // Note and manager menus.
             {"设置标题…", "Set title…"}, {"设置颜色…", "Set color…"}, {"双击修改标题", "Double-click to edit title"}, {"设为样式", "Apply style"}, {"卷起", "Roll up"},
-            {"不透明度", "Opacity"}, {"Ghost / 点击穿透", "Ghost / click-through"}, {"秘密便签", "Secret note"},
+            {"不透明度", "Opacity"}, {"整理到", "Organize into"}, {"显示与行为", "Display and behavior"}, {"导出与传输", "Export and transfer"},
+            {"点击穿透", "Click-through"}, {"自动调整高度时固定底边", "Keep bottom edge when auto-sizing"}, {"仅显示此便签", "Show only this note"}, {"秘密便签", "Secret note"},
             {"滚动模式", "Scroll mode"}, {"底部固定（Stand）", "Stand"}, {"取消 Solo", "Stop solo"},
             {"Solo / 仅显示此便签", "Solo / show only this note"}, {"闹钟…", "Alarm…"}, {"休眠", "Sleep"},
             {"明天", "Tomorrow"}, {"自定义…", "Custom…"}, {"重复…", "Repeat…"},

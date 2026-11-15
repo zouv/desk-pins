@@ -8,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Documents;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using DeskPins.Core;
 
@@ -47,7 +48,7 @@ namespace DeskPins.App
             saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) }; saveTimer.Tick += (s, e) => Flush();
             CreateEditor();
             SourceInitialized += (s, e) => { Native.ToolWindow(this); Native.SetGhost(this, Note.Ghost); };
-            Activated += (s, e) => { ApplyAppearance(); if (Host.Library.Catalog.Settings.ClickMakesVisible) Host.ShowAllNotes(); Host.BringStacksForward(); }; Deactivated += (s, e) => { Flush(); showOpacity = false; ApplyAppearance(); };
+            Activated += (s, e) => { ApplyAppearance(); if (Host.Library.Catalog.Settings.ClickMakesVisible) Host.ShowAllNotes(); Host.BringStacksForward(); }; Deactivated += (s, e) => { Flush(); showOpacity = false; ApplyAppearance(true); };
             LocationChanged += Location; SizeChanged += (s, e) => { if (internalChange || Note.Rolled) return; Note.Width = Width; Note.Height = Height; Note.ExpandedHeight = Height; QueueSave(); };
             PreviewKeyDown += HandleKeyDown; PreviewKeyUp += HandleKeyUp;
             PreviewMouseLeftButtonDown += (s, e) => { if (alarming) StopAlarm(false); };
@@ -80,19 +81,33 @@ namespace DeskPins.App
             internalChange = true; var requested = new Rect(Note.Left, Note.Top, Note.Width, Note.Rolled ? 24 : Math.Max(40, Note.Height)); var bounds = Host.Library.Catalog.Settings.KeepOnScreen ? Native.Clamp(requested) : new Rect(requested.Left, requested.Top, Math.Max(100, requested.Width), Math.Max(24, requested.Height)); Left = bounds.Left; Top = bounds.Top; Width = bounds.Width; Height = Note.Rolled ? 24 : bounds.Height; oldLeft = Left; oldTop = Top; content.Visibility = Note.Rolled ? Visibility.Collapsed : Visibility.Visible; Topmost = Note.Topmost; ApplyAppearance(); internalChange = false;
         }
         public void RefreshAppearance() { ApplyAppearance(); }
-        private void ApplyAppearance()
+        private void ApplyAppearance(bool restoreWithFade = false)
         {
             Title = "DeskPins · " + Note.DisplayTitle; Topmost = Note.Topmost;
-            Background = content.Background = Ui.Brush(Note.Color); title.Background = IsActive ? Ui.Brush("#527DA5") : Ui.Brush("#808080"); indicator.Background = Note.Topmost ? Ui.Brush("#193C61") : title.Background;
+            Background = content.Background = Ui.Brush(Note.Color); title.Background = IsActive ? Ui.Brush("#476F94") : Ui.Brush("#6B6B6B"); indicator.Background = Note.Topmost ? Ui.Brush("#193C61") : title.Background;
+            caption.Foreground = closeButton.Foreground = Brushes.White;
             frame.Effect = Ui.NoteShadow(Host.Library.Catalog.Settings.ShowShadow);
             caption.Text = (Note.Attachment != null ? "📎 " : "") + (Note.AlarmUtc.HasValue ? "◷ " : "") + Note.DisplayTitle; caption.ToolTip = Ui.Text("创建：") + Note.CreatedUtc.ToLocalTime() + "\n" + Ui.Text("修改：") + Note.ModifiedUtc.ToLocalTime() + (Note.AlarmUtc.HasValue ? "\n" + Ui.Text("闹钟：") + Note.AlarmUtc.Value.ToLocalTime() : "");
             closeButton.ToolTip = Ui.Text("关闭便签（可恢复）");
             if (TextEditor != null) { TextEditor.IsReadOnly = Note.Locked; TextEditor.Background = Ui.Brush(Note.Color); TextEditor.VerticalScrollBarVisibility = Note.Scrollbar ? ScrollBarVisibility.Auto : ScrollBarVisibility.Hidden; TextEditor.LinksClickable = Host.Library.Catalog.Settings.LinksClickable; TextEditor.CheckboxTrailingSpace = Host.Library.Catalog.Settings.CheckboxTrailingSpace; }
             if (ImageEditor != null) { ImageEditor.Locked = Note.Locked; ImageEditor.BackgroundColor = ((SolidColorBrush)Ui.Brush(Note.Color)).Color; ImageEditor.MaxUndo = Host.Library.Catalog.Settings.ImageUndoLevels; ImageEditor.SaveFormat = Host.Library.Catalog.Settings.ImageSaveType; }
-            Opacity = Host.Library.Catalog.Settings.OpaqueEditing && IsActive && !showOpacity ? 1 : Math.Max(.1, Math.Min(1, Note.Opacity));
+            ApplyOpacity(restoreWithFade);
             content.Opacity = Note.Secret && !IsActive ? 0 : 1; frame.BorderBrush = Host.Selected.Contains(Note.Id) ? Brushes.DodgerBlue : Brushes.DimGray; Native.SetGhost(this, Note.Ghost);
             var path = string.IsNullOrWhiteSpace(Note.SkinPath) ? Host.Library.Catalog.Settings.SkinPath : Note.SkinPath; var skin = Host.GetSkin(path); if (activeSkin != path) { activeSkin = path; skinButtons.Children.Clear(); if (skin?.Buttons != null) foreach (var item in skin.Buttons) { var action = item.Action; var button = new Button { Content = item.Text, FontSize = 10, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Foreground = Brushes.White, Padding = new Thickness(4, 0, 4, 0), ToolTip = action }; button.Click += (s, e) => Run(action); skinButtons.Children.Add(button); } }
             if (skin != null) { title.Background = Ui.Brush(skin.TitleColor); caption.Foreground = Ui.Brush(skin.TitleTextColor); frame.BorderBrush = Ui.Brush(skin.BorderColor); }
+        }
+        private void ApplyOpacity(bool restoreWithFade)
+        {
+            var settings = Host.Library.Catalog.Settings;
+            double target = settings.OpaqueEditing && IsActive && !showOpacity ? 1 : Math.Max(.1, Math.Min(1, Note.Opacity));
+            double current = Opacity;
+            BeginAnimation(OpacityProperty, null);
+            if (restoreWithFade && settings.OpaqueEditing && !settings.RestoreOpacityAfterEditing && target < current)
+            {
+                Opacity = target;
+                BeginAnimation(OpacityProperty, new DoubleAnimation(current, target, new Duration(TimeSpan.FromMilliseconds(180))) { FillBehavior = FillBehavior.Stop });
+            }
+            else Opacity = target;
         }
         public void QueueSave() { if (internalChange || closing) return; dirty = true; saveTimer.Stop(); saveTimer.Start(); }
         public void Flush()
@@ -183,7 +198,7 @@ namespace DeskPins.App
                 }
                 else directionChord = false;
             }
-            if (mods == ModifierKeys.Alt && key == Key.F4) { Host.Exit(); e.Handled = true; return; }
+            if (mods == ModifierKeys.Alt && key == Key.F4) { Run("close"); e.Handled = true; return; }
             if (key == Key.Escape) { ImageEditor?.CancelEdit(); Host.Select(null, false); if (alarming) StopAlarm(false); e.Handled = true; return; }
             if (mods == ModifierKeys.Control && key == Key.F4) { Run("close"); e.Handled = true; return; }
             if (key == Key.Apps) { var menu = mods == ModifierKeys.Shift ? (TextEditor != null ? TextMenu() : ImageMenu()) : Menu(); menu.PlacementTarget = this; menu.IsOpen = true; e.Handled = true; return; }
@@ -274,20 +289,41 @@ namespace DeskPins.App
         }
         private ContextMenu Menu()
         {
-            var m = new ContextMenu(); m.Items.Add(Ui.Item("设置标题…", () => Run("title"), Host.ShortcutFor("title"))); m.Items.Add(Ui.Item("设置颜色…", () => Host.SetColor(Note)));
-            var styles = Ui.Sub("设为样式"); for (int i = 0; i < 10; i++) { int ix = i; styles.Items.Add(Ui.Item(Host.Library.Catalog.Settings.Styles[i].Name, () => ApplyStyle(ix), "Alt+" + i)); }
+            var m = new ContextMenu();
+            m.Items.Add(Ui.Item("设置标题…", () => Run("title"), Host.ShortcutFor("title")));
+            m.Items.Add(Ui.Item("设置颜色…", () => Host.SetColor(Note)));
+            var styles = Ui.Sub("设为样式");
+            for (int i = 0; i < 10; i++) { int ix = i; styles.Items.Add(Ui.Item(Host.Library.Catalog.Settings.Styles[i].Name, () => ApplyStyle(ix), "Alt+" + i)); }
             m.Items.Add(styles);
-            m.Items.Add(new Separator()); m.Items.Add(Ui.Item("置顶", () => Toggle("top"), Host.ShortcutFor("top"), Note.Topmost)); m.Items.Add(Ui.Item("卷起", () => ToggleRoll(), Host.ShortcutFor("roll"), Note.Rolled)); m.Items.Add(Ui.Item("锁定内容", () => Toggle("lock"), Host.ShortcutFor("lock"), Note.Locked));
-            var opacity = Ui.Sub("不透明度"); foreach (var percent in new[] { 100, 90, 80, 70, 60, 50, 40, 30, 20 }) { var value = percent; opacity.Items.Add(Ui.Item(value + "%", () => { showOpacity = true; Note.Opacity = value / 100d; Host.Library.Save(Note); ApplyAppearance(); }, "", Math.Abs(Note.Opacity - value / 100d) < .01)); }
+            m.Items.Add(new Separator());
+            m.Items.Add(Ui.Item("置顶", () => Toggle("top"), Host.ShortcutFor("top"), Note.Topmost));
+            m.Items.Add(Ui.Item("卷起", () => ToggleRoll(), Host.ShortcutFor("roll"), Note.Rolled));
+            m.Items.Add(Ui.Item("锁定内容", () => Toggle("lock"), Host.ShortcutFor("lock"), Note.Locked));
+            var opacity = Ui.Sub("不透明度");
+            foreach (var percent in new[] { 100, 90, 80, 70, 60, 50, 40, 30, 20 }) { var value = percent; opacity.Items.Add(Ui.Item(value + "%", () => { showOpacity = true; Note.Opacity = value / 100d; Host.Library.Save(Note); ApplyAppearance(); }, "", Math.Abs(Note.Opacity - value / 100d) < .01)); }
             m.Items.Add(opacity);
-            m.Items.Add(Ui.Item("点击穿透（Ghost）", () => Toggle("ghost"), "", Note.Ghost)); m.Items.Add(Ui.Item("秘密便签", () => Toggle("secret"), "", Note.Secret)); m.Items.Add(Ui.Item("滚动模式", () => Toggle("scroll"), "", Note.Scrollbar)); m.Items.Add(Ui.Item("底部固定（Stand）", () => Toggle("stand"), "", Note.Stand)); m.Items.Add(Ui.Item("仅显示此便签（Solo）", () => Host.Solo(Note), "", Host.SoloId == Note.Id));
-            m.Items.Add(new Separator()); m.Items.Add(Ui.Item("闹钟…", () => Run("alarm"), Host.ShortcutFor("alarm"))); var sleep = Ui.Sub("休眠"); foreach (var minutes in new[] { 5, 15, 30, 60, 180, 1440 }) { int value = minutes; sleep.Items.Add(Ui.Item(value >= 60 ? value / 60 + " " + Ui.Text("小时") : value + " " + Ui.Text("分钟"), () => { Flush(); Host.Library.Sleep(Note, DateTime.UtcNow.AddMinutes(value)); })); }
-            sleep.Items.Add(Ui.Item("明天", () => Run("tomorrow"), Host.ShortcutFor("tomorrow"))); sleep.Items.Add(Ui.Item("自定义…", () => Run("sleep"), Host.ShortcutFor("sleep"))); sleep.Items.Add(Ui.Item("重复…", () => Run("repeat"), Host.ShortcutFor("repeat"))); m.Items.Add(sleep);
-            m.Items.Add(Ui.Item(Note.Attachment == null ? "附着到窗口…" : "修改附着 / 分离…", () => new AttachWindow(Host, Note).ShowDialog())); m.Items.Add(Ui.Item("标签…", () => Host.Tags(Note)));
-            var stored = Ui.Sub("存入文件夹"); stored.Items.Add(Ui.Item("根目录", () => { Flush(); Host.Library.Move(Note, NoteState.Stored); })); foreach (var folder in Host.Library.Catalog.Folders) { var f = folder; stored.Items.Add(Ui.Item(Host.FolderPath(f), () => { Flush(); Host.EnsureUnlocked(f); Host.Library.Move(Note, NoteState.Stored, f.Id); })); }
-            m.Items.Add(stored);
-            var stacks = Ui.Sub("放入堆叠"); stacks.Items.Add(Ui.Item("移出堆叠", () => { Note.StackId = ""; Host.Library.Save(Note); }, enabled: !string.IsNullOrEmpty(Note.StackId))); stacks.Items.Add(Ui.Item("新建堆叠…", () => Host.NewStack(Note))); foreach (var stack in Host.Library.Catalog.Stacks) { var st = stack; stacks.Items.Add(Ui.Item(st.Name, () => { Note.StackId = st.Id; Host.Library.Save(Note); }, check: Note.StackId == st.Id)); }
-            m.Items.Add(stacks);
+            m.Items.Add(new Separator());
+            m.Items.Add(Ui.Item("闹钟…", () => Run("alarm"), Host.ShortcutFor("alarm")));
+            var sleep = Ui.Sub("休眠");
+            foreach (var minutes in new[] { 5, 15, 30, 60, 180, 1440 }) { int value = minutes; sleep.Items.Add(Ui.Item(value >= 60 ? value / 60 + " " + Ui.Text("小时") : value + " " + Ui.Text("分钟"), () => { Flush(); Host.Library.Sleep(Note, DateTime.UtcNow.AddMinutes(value)); })); }
+            sleep.Items.Add(Ui.Item("明天", () => Run("tomorrow"), Host.ShortcutFor("tomorrow")));
+            sleep.Items.Add(Ui.Item("自定义…", () => Run("sleep"), Host.ShortcutFor("sleep")));
+            sleep.Items.Add(Ui.Item("重复…", () => Run("repeat"), Host.ShortcutFor("repeat")));
+            m.Items.Add(sleep);
+            m.Items.Add(new Separator());
+            m.Items.Add(Ui.Item(Note.Attachment == null ? "附着到窗口…" : "修改附着 / 分离…", () => new AttachWindow(Host, Note).ShowDialog()));
+            m.Items.Add(Ui.Item("标签…", () => Host.Tags(Note)));
+            var organize = Ui.Sub("整理到");
+            var stored = Ui.Sub("存入文件夹");
+            stored.Items.Add(Ui.Item("根目录", () => { Flush(); Host.Library.Move(Note, NoteState.Stored); }));
+            foreach (var folder in Host.Library.Catalog.Folders) { var f = folder; stored.Items.Add(Ui.Item(Host.FolderPath(f), () => { Flush(); Host.EnsureUnlocked(f); Host.Library.Move(Note, NoteState.Stored, f.Id); })); }
+            organize.Items.Add(stored);
+            var stacks = Ui.Sub("放入堆叠");
+            stacks.Items.Add(Ui.Item("移出堆叠", () => { Note.StackId = ""; Host.Library.Save(Note); }, enabled: !string.IsNullOrEmpty(Note.StackId)));
+            stacks.Items.Add(Ui.Item("新建堆叠…", () => Host.NewStack(Note)));
+            foreach (var stack in Host.Library.Catalog.Stacks) { var st = stack; stacks.Items.Add(Ui.Item(st.Name, () => { Note.StackId = st.Id; Host.Library.Save(Note); }, check: Note.StackId == st.Id)); }
+            organize.Items.Add(stacks);
+            m.Items.Add(organize);
             var send = Ui.Sub("发送到"); var groups = new System.Collections.Generic.Dictionary<string, MenuItem>();
             foreach (var friend in Host.Library.Catalog.Friends)
             {
@@ -296,9 +332,35 @@ namespace DeskPins.App
                 if (!string.IsNullOrWhiteSpace(f.Group)) { if (!groups.TryGetValue(f.Group, out target)) { target = Ui.Sub(f.Group); groups[f.Group] = target; send.Items.Add(target); } }
                 target.Items.Add(Ui.Item(f.Name, () => { Flush(); Host.Send(Note, f); }, enabled: !string.IsNullOrWhiteSpace(f.Address) || !string.IsNullOrWhiteSpace(f.Email)));
             }
-            send.Items.Add(Ui.Item("地址 / 多人…", () => { Flush(); Host.SendCustom(Note); })); m.Items.Add(send);
-            m.Items.Add(new Separator()); m.Items.Add(Ui.Item("复制便签", () => { Flush(); Host.Focus(Host.Library.Copy(Note)); })); m.Items.Add(Ui.Item("保存为…", () => Run("save"), Host.ShortcutFor("save"))); m.Items.Add(Ui.Item("复制到传输文件…", () => { Flush(); Host.TransferFile(Note, false); })); m.Items.Add(Ui.Item("发送到传输文件并关闭…", () => { Flush(); Host.TransferFile(Note, true); })); m.Items.Add(Ui.Item("打印…", () => Run("print"), Host.ShortcutFor("print"))); m.Items.Add(Ui.Item("设置皮肤…", () => Run("skin"), Host.ShortcutFor("skin"))); m.Items.Add(Ui.Item("恢复默认皮肤", () => { Note.SkinPath = ""; Host.Library.Save(Note); ApplyAppearance(); }));
-            Host.AddExtensionMenus(m, Note); m.Items.Add(new Separator()); m.Items.Add(Ui.Item("新建便签", () => Host.New(), Host.ShortcutFor("new"))); m.Items.Add(Ui.Item("管理便签…", () => Run("manage"), Host.ShortcutFor("manage"))); m.Items.Add(new Separator()); m.Items.Add(Ui.Item("关闭（可恢复）", () => Run("close"), Host.ShortcutFor("close"))); m.Items.Add(Ui.Item("永久删除…", () => Run("delete"), Host.ShortcutFor("delete"))); return m;
+            send.Items.Add(Ui.Item("地址 / 多人…", () => { Flush(); Host.SendCustom(Note); }));
+            m.Items.Add(send);
+            m.Items.Add(new Separator());
+            var behavior = Ui.Sub("显示与行为");
+            behavior.Items.Add(Ui.Item("点击穿透", () => Toggle("ghost"), "", Note.Ghost));
+            behavior.Items.Add(Ui.Item("秘密便签", () => Toggle("secret"), "", Note.Secret));
+            behavior.Items.Add(Ui.Item("滚动模式", () => Toggle("scroll"), "", Note.Scrollbar));
+            behavior.Items.Add(Ui.Item("自动调整高度时固定底边", () => Toggle("stand"), "", Note.Stand));
+            behavior.Items.Add(Ui.Item("仅显示此便签", () => Host.Solo(Note), "", Host.SoloId == Note.Id));
+            behavior.Items.Add(new Separator());
+            behavior.Items.Add(Ui.Item("设置皮肤…", () => Run("skin"), Host.ShortcutFor("skin")));
+            behavior.Items.Add(Ui.Item("恢复默认皮肤", () => { Note.SkinPath = ""; Host.Library.Save(Note); ApplyAppearance(); }));
+            m.Items.Add(behavior);
+            var transfer = Ui.Sub("导出与传输");
+            transfer.Items.Add(Ui.Item("保存为…", () => Run("save"), Host.ShortcutFor("save")));
+            transfer.Items.Add(Ui.Item("打印…", () => Run("print"), Host.ShortcutFor("print")));
+            transfer.Items.Add(new Separator());
+            transfer.Items.Add(Ui.Item("复制到传输文件…", () => { Flush(); Host.TransferFile(Note, false); }));
+            transfer.Items.Add(Ui.Item("发送到传输文件并关闭…", () => { Flush(); Host.TransferFile(Note, true); }));
+            m.Items.Add(transfer);
+            Host.AddExtensionMenus(m, Note);
+            m.Items.Add(new Separator());
+            m.Items.Add(Ui.Item("复制便签", () => { Flush(); Host.Focus(Host.Library.Copy(Note)); }));
+            m.Items.Add(Ui.Item("新建便签", () => Host.New(), Host.ShortcutFor("new")));
+            m.Items.Add(Ui.Item("管理便签…", () => Run("manage"), Host.ShortcutFor("manage")));
+            m.Items.Add(new Separator());
+            m.Items.Add(Ui.Item("关闭（可恢复）", () => Run("close"), Host.ShortcutFor("close")));
+            m.Items.Add(Ui.Item("永久删除…", () => Run("delete"), Host.ShortcutFor("delete")));
+            return m;
         }
         private ContextMenu TextMenu()
         {

@@ -38,7 +38,7 @@ namespace DeskPins.App
         private TextEditor editor;
         private Note editing;
         private Panel inlineTitleHost;
-        private bool dirty, loading, buildingTree, outlineFitPending, preservePaneWidths, applyingThinScrollBars;
+        private bool dirty, loading, buildingTree, outlineFitPending, preservePaneWidths, applyingThinScrollBars, thinScrollBarsQueued;
         private int paneLayoutCategory = -1;
         private int lastCategory = -1;
         private Point dragStart;
@@ -61,12 +61,13 @@ namespace DeskPins.App
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var body = new Grid();
-            body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60) });
+            body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(88) });
             body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             root.Children.Add(body);
 
             categories = new ListBox { BorderThickness = new Thickness(0, 0, 1, 0), BorderBrush = UiTheme.Border, Background = UiTheme.Background, Padding = new Thickness(1, 8, 1, 4), ItemContainerStyle = RailStyle(), HorizontalContentAlignment = HorizontalAlignment.Stretch, AllowDrop = true };
             categories.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
+            categories.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
             foreach (var category in CategoryOrder)
             {
                 var icon = new TextBlock
@@ -76,8 +77,8 @@ namespace DeskPins.App
                 };
                 var caption = new TextBlock
                 {
-                    Text = category == 10 ? "Search" : names[category], FontSize = 9, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center,
-                    TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 40, Margin = new Thickness(0, 2, 0, 0)
+                    Text = names[category], FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center,
+                    TextTrimming = TextTrimming.CharacterEllipsis, MinWidth = 68, MaxWidth = 78, Margin = new Thickness(0, 2, 0, 0)
                 };
                 caption.SetBinding(TextBlock.ForegroundProperty, new Binding("Foreground") { RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(ListBoxItem), 1) });
                 var content = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 3, 0, 3) };
@@ -85,7 +86,7 @@ namespace DeskPins.App
                 var item = new ListBoxItem
                 {
                     Content = content, ToolTip = names[category], Tag = category,
-                    HorizontalContentAlignment = HorizontalAlignment.Stretch, Height = 56
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch, Height = 62
                 };
                 System.Windows.Automation.AutomationProperties.SetName(item, names[category]);
                 categories.Items.Add(item);
@@ -109,7 +110,7 @@ namespace DeskPins.App
             outlineColumn = new ColumnDefinition { Width = new GridLength(0) }; outlineSplitterColumn = new ColumnDefinition { Width = new GridLength(0) };
             listColumn = new ColumnDefinition { Width = new GridLength(0) }; listSplitterColumn = new ColumnDefinition { Width = new GridLength(0) };
             workspace.ColumnDefinitions.Add(outlineColumn); workspace.ColumnDefinitions.Add(outlineSplitterColumn); workspace.ColumnDefinitions.Add(listColumn); workspace.ColumnDefinitions.Add(listSplitterColumn);
-            previewColumn = new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 220 };
+            previewColumn = new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 245 };
             workspace.ColumnDefinitions.Add(previewColumn);
 
             outlineHeading = new TextBlock { FontSize = 19, FontWeight = FontWeights.SemiBold, Foreground = UiTheme.Text, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 0, 0, 8) };
@@ -227,8 +228,7 @@ namespace DeskPins.App
             Content = root;
 
             host.Library.Changed += Changed;
-            LayoutUpdated += (s, e) => ApplyThinScrollBars();
-            Loaded += (s, e) => Dispatcher.BeginInvoke(new Action(ApplyThinScrollBars), System.Windows.Threading.DispatcherPriority.Loaded);
+            Loaded += (s, e) => QueueThinScrollBars();
             Closing += (s, e) => { if (host.StorageFailed) return; try { SaveEditor(); SaveManagerState(); host.Library.SaveCatalog(); } catch (Exception ex) { e.Cancel = true; Ui.Error(ex, this); } };
             Closed += (s, e) => { saveTimer.Stop(); searchTimer.Stop(); host.Library.Changed -= Changed; };
             Deactivated += (s, e) => { try { SaveEditor(); } catch (Exception ex) { Ui.Error(ex, this); } };
@@ -321,6 +321,13 @@ namespace DeskPins.App
             for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) foreach (var child in Visuals(VisualTreeHelper.GetChild(root, i))) yield return child;
         }
 
+        private void QueueThinScrollBars()
+        {
+            if (thinScrollBarsQueued) return;
+            thinScrollBarsQueued = true;
+            Dispatcher.BeginInvoke(new Action(() => { thinScrollBarsQueued = false; ApplyThinScrollBars(); }), System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+
         private void ApplyThinScrollBars()
         {
             if (applyingThinScrollBars) return;
@@ -329,8 +336,16 @@ namespace DeskPins.App
             {
                 foreach (var bar in Visuals(this).OfType<ScrollBar>())
                 {
-                    if (bar.Orientation == Orientation.Vertical) { if (bar.Width != 6) bar.Width = 6; }
-                    else if (bar.Height != 6) bar.Height = 6;
+                    if (bar.Orientation == Orientation.Vertical)
+                    {
+                        if (bar.MinWidth != UiTheme.ThinScrollBarSize) bar.MinWidth = UiTheme.ThinScrollBarSize;
+                        if (bar.Width != UiTheme.ThinScrollBarSize) bar.Width = UiTheme.ThinScrollBarSize;
+                    }
+                    else
+                    {
+                        if (bar.MinHeight != UiTheme.ThinScrollBarSize) bar.MinHeight = UiTheme.ThinScrollBarSize;
+                        if (bar.Height != UiTheme.ThinScrollBarSize) bar.Height = UiTheme.ThinScrollBarSize;
+                    }
                 }
             }
             finally { applyingThinScrollBars = false; }
@@ -416,7 +431,7 @@ namespace DeskPins.App
             if (workspace == null || !IsOutlineCategory(SelectedCategory)) return;
             double total = outlineColumn.ActualWidth + listColumn.ActualWidth;
             if (total <= 0) return;
-            double maxList = Math.Max(260, workspace.ActualWidth - 10 - 220 - 100);
+            double maxList = Math.Max(260, workspace.ActualWidth - 10 - 245 - 100);
             double minOutline = Math.Max(100, total - maxList);
             double maxOutline = Math.Max(minOutline, Math.Min(420, total - 260));
             double target = Math.Max(minOutline, Math.Min(maxOutline, outlineColumn.ActualWidth + delta));
@@ -484,19 +499,19 @@ namespace DeskPins.App
             if (workspace == null || workspace.ActualWidth <= 0 || SelectedCategory == 0) return;
             bool outline = IsOutlineCategory(SelectedCategory);
             double splitters = outline ? 10 : 5;
-            double maxList = Math.Max(260, workspace.ActualWidth - splitters - 220 - 100);
+            double maxList = Math.Max(260, workspace.ActualWidth - splitters - 245 - 100);
             listColumn.MinWidth = 260;
             listColumn.MaxWidth = maxList;
             if (listColumn.Width.Value > maxList) listColumn.Width = new GridLength(maxList);
             if (outline && !outlineFitPending && outlineColumn.Width.IsAbsolute)
             {
-                double maxOutline = Math.Max(100, workspace.ActualWidth - splitters - listColumn.Width.Value - 220);
+                double maxOutline = Math.Max(100, workspace.ActualWidth - splitters - listColumn.Width.Value - 245);
                 if (outlineColumn.Width.Value > maxOutline) outlineColumn.Width = new GridLength(maxOutline);
             }
             if (!outline || !outlineFitPending) return;
             double available = Math.Max(370, workspace.ActualWidth - splitters - listColumn.Width.Value);
             double target = Math.Max(GetOutlineWidth(SelectedCategory), available * .5);
-            target = Math.Max(100, Math.Min(420, Math.Min(target, available - 220)));
+            target = Math.Max(100, Math.Min(420, Math.Min(target, available - 245)));
             outlineColumn.Width = new GridLength(Math.Max(1, target), GridUnitType.Star);
             previewColumn.Width = new GridLength(Math.Max(1, available - target), GridUnitType.Star);
             outlineFitPending = false;
@@ -538,7 +553,7 @@ namespace DeskPins.App
                 listEmpty.Child = EmptyState("无法加载便签列表", refreshError, "重试", Refresh);
                 listEmpty.Visibility = Visibility.Visible;
             }
-            finally { loading = false; refreshing = false; }
+            finally { loading = false; refreshing = false; QueueThinScrollBars(); }
         }
 
         private void RefreshCore()
@@ -554,7 +569,7 @@ namespace DeskPins.App
             }
             foreach (var note in host.Library.Notes.Values)
             {
-                note.DisplayModifiedDates = host.Library.Catalog.Settings.ManagerModifiedDates;
+                note.DateLabelPrefix = Ui.Text("修改于");
                 note.CompactPreview = host.Library.Catalog.Settings.CompactList;
                 note.ShowId = category == 7;
                 note.DisplayTags = (note.Tags ?? new List<string>()).Select(id => host.Library.Catalog.Tags.FirstOrDefault(t => t.Id == id)).Where(t => t != null).ToList();
@@ -565,7 +580,7 @@ namespace DeskPins.App
             {
                 case 1: list = list.Where(n => n.State == NoteState.Desktop && n.StackId == "" && n.Attachment == null); break;
                 case 2: list = list.Where(n => n.StackId != "" && (stackFilter == "" || n.StackId == stackFilter)); break;
-                case 3: list = list.Where(n => n.Attachment != null && !host.IsAttachmentVisible(n)); break;
+                case 3: list = list.Where(n => n.Attachment != null); break;
                 case 4: list = list.Where(n => n.State == NoteState.Sleeping); break;
                 case 5: list = list.Where(n => n.State == NoteState.Recurring); break;
                 case 6: list = list.Where(n => MatchesDate(n, calendarSelected)); break;
@@ -625,29 +640,33 @@ namespace DeskPins.App
             string[] labels = { names[1], names[2], names[3], names[4], names[5], names[7], names[8] };
             int max = Math.Max(1, counts.Max());
             var metrics = new Grid { Margin = new Thickness(0, 24, 0, 18) };
-            metrics.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(46) });
+            metrics.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
+            metrics.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             metrics.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             metrics.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
             for (int i = 0; i < counts.Length; i++)
             {
                 var row = new Grid { Height = 42, Margin = new Thickness(0, 0, 0, 2) };
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(46) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
-                var icon = new TextBlock { Text = glyphs[i], FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 22, Foreground = UiTheme.Accent, VerticalAlignment = VerticalAlignment.Center, ToolTip = labels[i] };
+                var icon = new TextBlock { Text = glyphs[i], FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 22, Foreground = UiTheme.Accent, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, ToolTip = labels[i] };
                 row.Children.Add(icon);
+                var label = new TextBlock { Text = labels[i], FontSize = 14, Foreground = UiTheme.Text, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 14, 0), TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = labels[i] };
+                Grid.SetColumn(label, 1); row.Children.Add(label);
                 var barHost = new Grid { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 8, 12, 8) };
                 var bar = new Border { Background = UiTheme.Accent, Height = 20, HorizontalAlignment = HorizontalAlignment.Left, Width = counts[i] == 0 ? 0 : Math.Min(620, Math.Max(4, counts[i] * (520.0 / max))) };
-                barHost.Children.Add(bar); Grid.SetColumn(barHost, 1); row.Children.Add(barHost);
+                barHost.Children.Add(bar); Grid.SetColumn(barHost, 2); row.Children.Add(barHost);
                 var value = new TextBlock { Text = counts[i].ToString(), FontSize = 18, Foreground = UiTheme.Text, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
-                Grid.SetColumn(value, 2); row.Children.Add(value);
+                Grid.SetColumn(value, 3); row.Children.Add(value);
                 var line = new Border { BorderBrush = UiTheme.Border, BorderThickness = new Thickness(0, 0, 0, 1), Margin = new Thickness(0, 0, 0, 0), VerticalAlignment = VerticalAlignment.Bottom };
                 var wrapper = new Grid(); wrapper.Children.Add(row); wrapper.Children.Add(line); metrics.Children.Add(wrapper);
                 metrics.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-                Grid.SetRow(wrapper, i); Grid.SetColumnSpan(wrapper, 3);
+                Grid.SetRow(wrapper, i); Grid.SetColumnSpan(wrapper, 4);
             }
             panel.Children.Add(metrics);
-            int totalCount = counts.Sum(), textCount = all.Count(n => n.Kind == NoteKind.Text), imageCount = all.Count(n => n.Kind == NoteKind.Image), encrypted = all.Count(n => n.Encrypted);
+            int totalCount = all.Select(n => n.Id).Distinct().Count(), textCount = all.Count(n => n.Kind == NoteKind.Text), imageCount = all.Count(n => n.Kind == NoteKind.Image), encrypted = all.Count(n => n.Encrypted);
             long dbKb = 0; try { dbKb = new FileInfo(host.Library.Repository.FilePath).Length / 1024; } catch (IOException) { }
             var footer = new Grid { Margin = new Thickness(0, 18, 0, 0) };
             footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -707,6 +726,7 @@ namespace DeskPins.App
             if (loading || SelectedCategory == 0) return;
             var n = notes.SelectedItem as Note;
             if (!force && ReferenceEquals(editing, n) && n != null && (dirty || n.ModifiedUtc == displayedModifiedUtc)) return;
+            QueueThinScrollBars();
             SaveEditor(); editing = n; editor = null; saveFeedback = null; dirty = false; preview.Content = null; inlineTitleHost = null;
             if (n == null) { preview.Content = EmptyState("选择便签查看内容", "正文可在这里编辑；历史便签只有执行“恢复到桌面”才会重新显示在桌面。"); return; }
             displayedModifiedUtc = n.ModifiedUtc;

@@ -139,6 +139,8 @@ namespace DeskPins.App
         {
             var root = new FrameworkElementFactory(typeof(Border), "root");
             root.SetValue(Border.BackgroundProperty, Brushes.Transparent);
+            root.SetValue(Border.BorderBrushProperty, Brushes.Transparent);
+            root.SetValue(Border.BorderThicknessProperty, new Thickness(1));
             root.SetValue(Border.CornerRadiusProperty, new CornerRadius(6));
             root.SetValue(Border.PaddingProperty, new Thickness(0, 9, 0, 9));
             var grid = new FrameworkElementFactory(typeof(Grid));
@@ -161,6 +163,9 @@ namespace DeskPins.App
             selected.Setters.Add(new Setter(Border.BackgroundProperty, UiTheme.Accent, "accent"));
             selected.Setters.Add(new Setter(Control.ForegroundProperty, Ui.Brush("#1B4F72")));
             template.Triggers.Add(hover); template.Triggers.Add(selected);
+            var focused = new Trigger { Property = UIElement.IsKeyboardFocusedProperty, Value = true };
+            focused.Setters.Add(new Setter(Border.BorderBrushProperty, UiTheme.Accent, "root"));
+            template.Triggers.Add(focused);
             var style = new Style(typeof(ListBoxItem));
             style.Setters.Add(new Setter(Control.TemplateProperty, template));
             style.Setters.Add(new Setter(Control.ForegroundProperty, UiTheme.Text));
@@ -252,7 +257,6 @@ namespace DeskPins.App
             NumberControl(grid, "BackupHours", "自动备份间隔（小时，0=关闭）", settings.BackupHours, v => settings.BackupHours = v);
             AddSection(grid, "管理列表");
             SwitchRow(grid, "紧凑管理列表", settings.CompactList, v => settings.CompactList = v);
-            SwitchRow(grid, "管理列表显示最后修改日期", settings.ManagerModifiedDates, v => settings.ManagerModifiedDates = v);
             panel.Children.Add(grid);
         }
 
@@ -549,9 +553,12 @@ namespace DeskPins.App
             CheckShortcutFields();
             var root = new Grid();
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            var searchLabel = new TextBlock { Text = Ui.Text("搜索快捷键名称或按键"), Foreground = UiTheme.Muted, FontSize = 12, Margin = new Thickness(2, 0, 2, 4) };
+            root.Children.Add(searchLabel);
             var search = new TextBox { Text = shortcutSearch, MinHeight = 30, Margin = new Thickness(0, 0, 0, 12), ToolTip = Ui.Text("搜索快捷键名称或按键") };
-            AutomationProperties.SetName(search, Ui.Text("搜索快捷键名称或按键")); root.Children.Add(search);
+            AutomationProperties.SetName(search, Ui.Text("搜索快捷键名称或按键")); Grid.SetRow(search, 1); root.Children.Add(search);
             var tabs = new TabControl { BorderThickness = new Thickness(0), Background = Brushes.Transparent, Padding = new Thickness(0, 4, 0, 0) };
             AutomationProperties.SetName(tabs, Ui.Text("快捷键范围"));
             var searchable = new List<Tuple<FrameworkElement, string, string>>();
@@ -584,9 +591,9 @@ namespace DeskPins.App
             tabs.Items.Add(HotkeyTab("全局快捷键", global)); tabs.Items.Add(HotkeyTab("应用内快捷键", local));
             tabs.SelectedIndex = shortcutTab;
             tabs.SelectionChanged += (s, e) => { if (e.Source == tabs) shortcutTab = Math.Max(0, tabs.SelectedIndex); };
-            Grid.SetRow(tabs, 1); root.Children.Add(tabs);
+            Grid.SetRow(tabs, 2); root.Children.Add(tabs);
             var empty = new TextBlock { Text = Ui.Text("没有匹配的快捷键"), Foreground = UiTheme.Muted, Margin = new Thickness(8, 44, 8, 8), IsHitTestVisible = false };
-            Grid.SetRow(empty, 1); root.Children.Add(empty);
+            Grid.SetRow(empty, 2); root.Children.Add(empty);
             Action filter = () =>
             {
                 shortcutSearch = search.Text; var query = shortcutSearch.Trim();
@@ -776,6 +783,8 @@ namespace DeskPins.App
             grid.SetValue(FrameworkElement.HeightProperty, 20d);
             var track = new FrameworkElementFactory(typeof(Border), "track");
             track.SetValue(Border.BackgroundProperty, Ui.Brush("#C9CED6"));
+            track.SetValue(Border.BorderBrushProperty, Brushes.Transparent);
+            track.SetValue(Border.BorderThicknessProperty, new Thickness(0));
             track.SetValue(Border.CornerRadiusProperty, new CornerRadius(10));
             var knob = new FrameworkElementFactory(typeof(Border), "knob");
             knob.SetValue(FrameworkElement.WidthProperty, 16d);
@@ -794,6 +803,10 @@ namespace DeskPins.App
             checkedTrigger.Setters.Add(new Setter(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Right, "knob"));
             checkedTrigger.Setters.Add(new Setter(FrameworkElement.MarginProperty, new Thickness(0, 0, 2, 0), "knob"));
             template.Triggers.Add(hover); template.Triggers.Add(checkedTrigger);
+            var focused = new Trigger { Property = UIElement.IsKeyboardFocusedProperty, Value = true };
+            focused.Setters.Add(new Setter(Border.BorderBrushProperty, UiTheme.Text, "track"));
+            focused.Setters.Add(new Setter(Border.BorderThicknessProperty, new Thickness(2), "track"));
+            template.Triggers.Add(focused);
             return new ToggleButton
             {
                 IsChecked = isChecked, Width = 36, Height = 20, Template = template, Background = Brushes.Transparent,
@@ -814,7 +827,7 @@ namespace DeskPins.App
         private static Grid SettingsGrid()
         {
             var grid = new Grid { MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 0, 0, 20) };
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(178) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             return grid;
         }
@@ -850,10 +863,11 @@ namespace DeskPins.App
         private static void AddHintRow(Grid grid, string text) { AddFullRow(grid, Hint(text)); }
         private void SwitchRow(Grid grid, string label, bool value, Action<bool> setter)
         {
-            var panel = new DockPanel { LastChildFill = true, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 8, 2, 8) };
+            var panel = new DockPanel { LastChildFill = true, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 4, 2, 4), MinHeight = 32, Background = Brushes.Transparent, Cursor = Cursors.Hand };
             var toggle = Switch(value); toggle.Margin = new Thickness(0, 0, 10, 0); DockPanel.SetDock(toggle, Dock.Left);
             AutomationProperties.SetName(toggle, Ui.Text(label));
             toggle.Checked += (s, e) => setter(true); toggle.Unchecked += (s, e) => setter(false);
+            panel.MouseLeftButtonUp += (s, e) => { if (toggle.IsMouseOver || !toggle.IsEnabled) return; toggle.IsChecked = toggle.IsChecked != true; toggle.Focus(); e.Handled = true; };
             panel.Children.Add(toggle);
             panel.Children.Add(new TextBlock { Text = Ui.Text(label), VerticalAlignment = VerticalAlignment.Center, Foreground = UiTheme.Text, TextWrapping = TextWrapping.Wrap });
             AddFullRow(grid, panel);

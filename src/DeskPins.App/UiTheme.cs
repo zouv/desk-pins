@@ -36,15 +36,17 @@ namespace DeskPins.App
             window.Resources[typeof(ComboBox)] = combo;
         }
 
+        internal const double ThinScrollBarSize = 11d;
+
         public static Style ThinScrollBarStyle()
         {
             var style = new Style(typeof(ScrollBar));
             var vertical = new Trigger { Property = ScrollBar.OrientationProperty, Value = Orientation.Vertical };
-            vertical.Setters.Add(new Setter(FrameworkElement.WidthProperty, 6d));
-            vertical.Setters.Add(new Setter(FrameworkElement.MinWidthProperty, 6d));
+            vertical.Setters.Add(new Setter(FrameworkElement.WidthProperty, ThinScrollBarSize));
+            vertical.Setters.Add(new Setter(FrameworkElement.MinWidthProperty, ThinScrollBarSize));
             var horizontal = new Trigger { Property = ScrollBar.OrientationProperty, Value = Orientation.Horizontal };
-            horizontal.Setters.Add(new Setter(FrameworkElement.HeightProperty, 6d));
-            horizontal.Setters.Add(new Setter(FrameworkElement.MinHeightProperty, 6d));
+            horizontal.Setters.Add(new Setter(FrameworkElement.HeightProperty, ThinScrollBarSize));
+            horizontal.Setters.Add(new Setter(FrameworkElement.MinHeightProperty, ThinScrollBarSize));
             style.Triggers.Add(vertical); style.Triggers.Add(horizontal);
             return style;
         }
