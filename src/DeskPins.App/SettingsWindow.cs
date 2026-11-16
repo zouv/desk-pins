@@ -279,8 +279,6 @@ namespace DeskPins.App
             }, settings.DoubleClickAction, v => settings.DoubleClickAction = v));
             SwitchRow(grid, "卷起的便签使用独立屏幕位置", settings.RolledDifferentPosition, v => settings.RolledDifferentPosition = v);
             SwitchRow(grid, "锁定内容时禁止移动和缩放", settings.LockPreventsMove, v => settings.LockPreventsMove = v);
-            SwitchRow(grid, "编辑透明便签时临时不透明", settings.OpaqueEditing, v => settings.OpaqueEditing = v);
-            SwitchRow(grid, "结束编辑后恢复透明（不渐变）", settings.RestoreOpacityAfterEditing, v => settings.RestoreOpacityAfterEditing = v);
             SwitchRow(grid, "避免便签保存到屏幕外", settings.KeepOnScreen, v => settings.KeepOnScreen = v);
             panel.Children.Add(grid);
         }

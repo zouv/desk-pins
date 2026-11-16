@@ -9,7 +9,6 @@ using System.Windows.Input;
 using System.Windows.Documents;
 using System.Windows.Interop;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using DeskPins.Core;
 
@@ -31,7 +30,7 @@ namespace DeskPins.App
         private readonly Border fontSizeTip;
         private readonly TextBlock fontSizeTipText;
         private DispatcherTimer alarmTimer;
-        private bool internalChange, closing, movingGroup, alarming, dirty, resizing, showOpacity, directionChord;
+        private bool internalChange, closing, movingGroup, alarming, dirty, resizing, directionChord;
         private double oldLeft, oldTop;
         private string lastFind = "";
         private int alarmStep;
@@ -42,9 +41,26 @@ namespace DeskPins.App
             UseLayoutRounding = true; SnapsToDevicePixels = true; Background = Ui.Brush(note.Color);
             var root = new Grid(); root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(22) }); root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             frame = new Border { BorderThickness = new Thickness(1), BorderBrush = Brushes.DimGray, Child = root }; Content = frame;
-            var strip = new Grid(); strip.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(9) }); strip.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); strip.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); strip.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
+            var strip = new Grid(); strip.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) }); strip.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); strip.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); strip.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
             indicator = new TextBlock(); strip.Children.Add(indicator); caption = new TextBlock { FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis, Foreground = Brushes.White }; Grid.SetColumn(caption, 1); strip.Children.Add(caption);
-            var close = new Button { Content = "×", FontSize = 15, Padding = new Thickness(0), Background = Brushes.Transparent, Foreground = Brushes.White, BorderThickness = new Thickness(0), ToolTip = Ui.Text("关闭便签（可恢复）") }; closeButton = close; skinButtons = new StackPanel { Orientation = Orientation.Horizontal }; Grid.SetColumn(skinButtons, 2); strip.Children.Add(skinButtons); Grid.SetColumn(close, 3); strip.Children.Add(close); close.Click += (s, e) => { Flush(); Host.CloseNotes(Note); };
+            var close = new Button { Content = "×", FontSize = 15, Padding = new Thickness(0), Background = Brushes.Transparent, Foreground = Brushes.White, BorderThickness = new Thickness(0), ToolTip = Ui.Text("关闭便签（可恢复）") }; closeButton = close;
+            var closeTemplate = new ControlTemplate(typeof(Button));
+            var closeOuter = new FrameworkElementFactory(typeof(Border));
+            closeOuter.SetValue(Border.BackgroundProperty, Brushes.Transparent);
+            var closeBorder = new FrameworkElementFactory(typeof(Border));
+            closeBorder.SetValue(Border.MarginProperty, new Thickness(2));
+            closeBorder.SetValue(Border.CornerRadiusProperty, new CornerRadius(4));
+            closeBorder.SetBinding(Border.BackgroundProperty, new System.Windows.Data.Binding("Background") { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.TemplatedParent) });
+            var closeContent = new FrameworkElementFactory(typeof(ContentPresenter));
+            closeContent.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            closeContent.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+            closeBorder.AppendChild(closeContent);
+            closeOuter.AppendChild(closeBorder);
+            closeTemplate.VisualTree = closeOuter;
+            var closeHover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+            closeHover.Setters.Add(new Setter(UIElement.OpacityProperty, .75));
+            closeTemplate.Triggers.Add(closeHover);
+            closeButton.Template = closeTemplate; skinButtons = new StackPanel { Orientation = Orientation.Horizontal }; Grid.SetColumn(skinButtons, 2); strip.Children.Add(skinButtons); Grid.SetColumn(close, 3); strip.Children.Add(close); close.Click += (s, e) => { Flush(); Host.CloseNotes(Note); };
             title = new Border { Child = strip }; root.Children.Add(title);
             title.MouseLeftButtonDown += DragTitle;
             title.MouseMove += (s, e) => { if (e.LeftButton == MouseButtonState.Pressed && (Keyboard.Modifiers & ModifierKeys.Control) != 0) { Flush(); var copy = Host.Library.Copy(Note); Host.Focus(copy); try { Host.Windows[copy.Id].DragMove(); } catch (InvalidOperationException) { } } }; title.MouseRightButtonUp += (s, e) => { if (alarming) { StopAlarm(true); e.Handled = true; return; } var menu = Menu(); menu.PlacementTarget = title; menu.IsOpen = true; e.Handled = true; };
@@ -56,7 +72,7 @@ namespace DeskPins.App
             fontSizeTipTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) }; fontSizeTipTimer.Tick += (s, e) => { fontSizeTipTimer.Stop(); fontSizeTip.Visibility = Visibility.Collapsed; };
             CreateEditor();
             SourceInitialized += (s, e) => { Native.ToolWindow(this); Native.SetGhost(this, Note.Ghost); };
-            Activated += (s, e) => { ApplyAppearance(); if (Host.Library.Catalog.Settings.ClickMakesVisible) Host.ShowAllNotes(); Host.BringStacksForward(); }; Deactivated += (s, e) => { Flush(); showOpacity = false; ApplyAppearance(true); };
+            Activated += (s, e) => { ApplyAppearance(); if (Host.Library.Catalog.Settings.ClickMakesVisible) Host.ShowAllNotes(); Host.BringStacksForward(); }; Deactivated += (s, e) => { Flush(); ApplyAppearance(); };
             LocationChanged += Location; SizeChanged += (s, e) => { if (internalChange || Note.Rolled) return; Note.Width = Width; Note.Height = Height; Note.ExpandedHeight = Height; QueueSave(); };
             PreviewKeyDown += HandleKeyDown; PreviewKeyUp += HandleKeyUp;
             PreviewMouseLeftButtonDown += (s, e) => { if (alarming) StopAlarm(false); };
@@ -113,33 +129,28 @@ namespace DeskPins.App
             internalChange = true; var requested = new Rect(Note.Left, Note.Top, Note.Width, Note.Rolled ? 24 : Math.Max(40, Note.Height)); var bounds = Host.Library.Catalog.Settings.KeepOnScreen ? Native.Clamp(requested) : new Rect(requested.Left, requested.Top, Math.Max(100, requested.Width), Math.Max(24, requested.Height)); Left = bounds.Left; Top = bounds.Top; Width = bounds.Width; Height = Note.Rolled ? 24 : bounds.Height; oldLeft = Left; oldTop = Top; content.Visibility = Note.Rolled ? Visibility.Collapsed : Visibility.Visible; Topmost = Note.Topmost; ApplyAppearance(); internalChange = false;
         }
         public void RefreshAppearance() { ApplyAppearance(); }
-        private void ApplyAppearance(bool restoreWithFade = false)
+        private void ApplyAppearance()
         {
             Title = "DeskPins · " + Note.DisplayTitle; Topmost = Note.Topmost;
-            Background = content.Background = Ui.Brush(Note.Color); title.Background = IsActive ? Ui.Brush("#476F94") : Ui.Brush("#6B6B6B"); indicator.Background = Note.Topmost ? Ui.Brush("#193C61") : title.Background;
+            Background = content.Background = Ui.Brush(Note.Color); title.Background = IsActive ? Ui.Brush("#476F94") : Ui.Brush("#6B6B6B");
+            var stack = Note.StackId == "" ? null : Host.Library.Catalog.Stacks.FirstOrDefault(s => s.Id == Note.StackId);
+            indicator.Background = Note.Topmost ? Ui.Brush("#9CC3E5") : title.Background;
             caption.Foreground = closeButton.Foreground = Brushes.White;
+            closeButton.Background = stack != null ? Ui.Brush(stack.Color) : Brushes.Transparent;
+            if (stack != null) closeButton.Foreground = Ui.TextOn(stack.Color);
             frame.Effect = Ui.NoteShadow(Host.Library.Catalog.Settings.ShowShadow);
             caption.Text = (Note.Attachment != null ? "📎 " : "") + (Note.AlarmUtc.HasValue ? "◷ " : "") + Note.DisplayTitle; caption.ToolTip = Ui.Text("创建：") + Note.CreatedUtc.ToLocalTime() + "\n" + Ui.Text("修改：") + Note.ModifiedUtc.ToLocalTime() + (Note.AlarmUtc.HasValue ? "\n" + Ui.Text("闹钟：") + Note.AlarmUtc.Value.ToLocalTime() : "");
             closeButton.ToolTip = Ui.Text("关闭便签（可恢复）");
             if (TextEditor != null) { TextEditor.IsReadOnly = Note.Locked; TextEditor.Background = Ui.Brush(Note.Color); TextEditor.VerticalScrollBarVisibility = Note.Scrollbar ? ScrollBarVisibility.Auto : ScrollBarVisibility.Hidden; TextEditor.LinksClickable = Host.Library.Catalog.Settings.LinksClickable; TextEditor.CheckboxTrailingSpace = Host.Library.Catalog.Settings.CheckboxTrailingSpace; }
             if (ImageEditor != null) { ImageEditor.Locked = Note.Locked; ImageEditor.BackgroundColor = ((SolidColorBrush)Ui.Brush(Note.Color)).Color; ImageEditor.MaxUndo = Host.Library.Catalog.Settings.ImageUndoLevels; ImageEditor.SaveFormat = Host.Library.Catalog.Settings.ImageSaveType; }
-            ApplyOpacity(restoreWithFade);
+            ApplyOpacity();
             content.Opacity = Note.Secret && !IsActive ? 0 : 1; frame.BorderBrush = Host.Selected.Contains(Note.Id) ? Brushes.DodgerBlue : Brushes.DimGray; Native.SetGhost(this, Note.Ghost);
             var path = string.IsNullOrWhiteSpace(Note.SkinPath) ? Host.Library.Catalog.Settings.SkinPath : Note.SkinPath; var skin = Host.GetSkin(path); if (activeSkin != path) { activeSkin = path; skinButtons.Children.Clear(); if (skin?.Buttons != null) foreach (var item in skin.Buttons) { var action = item.Action; var button = new Button { Content = item.Text, FontSize = 10, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Foreground = Brushes.White, Padding = new Thickness(4, 0, 4, 0), ToolTip = action }; button.Click += (s, e) => Run(action); skinButtons.Children.Add(button); } }
             if (skin != null) { title.Background = Ui.Brush(skin.TitleColor); caption.Foreground = Ui.Brush(skin.TitleTextColor); frame.BorderBrush = Ui.Brush(skin.BorderColor); }
         }
-        private void ApplyOpacity(bool restoreWithFade)
+        private void ApplyOpacity()
         {
-            var settings = Host.Library.Catalog.Settings;
-            double target = settings.OpaqueEditing && IsActive && !showOpacity ? 1 : Math.Max(.1, Math.Min(1, Note.Opacity));
-            double current = Opacity;
-            BeginAnimation(OpacityProperty, null);
-            if (restoreWithFade && settings.OpaqueEditing && !settings.RestoreOpacityAfterEditing && target < current)
-            {
-                Opacity = target;
-                BeginAnimation(OpacityProperty, new DoubleAnimation(current, target, new Duration(TimeSpan.FromMilliseconds(180))) { FillBehavior = FillBehavior.Stop });
-            }
-            else Opacity = target;
+            Opacity = Math.Max(.1, Math.Min(1, Note.Opacity));
         }
         public void QueueSave() { if (internalChange || closing) return; dirty = true; saveTimer.Stop(); saveTimer.Start(); }
         public void Flush()
@@ -317,7 +328,7 @@ namespace DeskPins.App
         public void ApplyStyle(int index)
         {
             var style = Host.Library.Catalog.Settings.Styles[index]; if (TextEditor != null && !TextEditor.Selection.IsEmpty) { if (Note.Locked) return; TextEditor.Selection.ApplyPropertyValue(TextElement.FontFamilyProperty, new FontFamily(style.FontName)); TextEditor.Selection.ApplyPropertyValue(TextElement.FontSizeProperty, Math.Max(1, Math.Round(style.FontSize, MidpointRounding.AwayFromZero))); TextEditor.Selection.ApplyPropertyValue(TextElement.ForegroundProperty, Ui.Brush(style.Foreground)); QueueSave(); }
-            else { showOpacity = true; style.Apply(Note); if (TextEditor != null && !Note.Locked) { TextEditor.SelectAll(); TextEditor.Selection.ApplyPropertyValue(TextElement.FontFamilyProperty, new FontFamily(style.FontName)); TextEditor.Selection.ApplyPropertyValue(TextElement.FontSizeProperty, Math.Max(1, Math.Round(style.FontSize, MidpointRounding.AwayFromZero))); TextEditor.Selection.ApplyPropertyValue(TextElement.ForegroundProperty, Ui.Brush(style.Foreground)); TextEditor.Selection.Select(TextEditor.Document.ContentEnd, TextEditor.Document.ContentEnd); } QueueSave(); Flush(); ApplyAppearance(); }
+            else { style.Apply(Note); if (TextEditor != null && !Note.Locked) { TextEditor.SelectAll(); TextEditor.Selection.ApplyPropertyValue(TextElement.FontFamilyProperty, new FontFamily(style.FontName)); TextEditor.Selection.ApplyPropertyValue(TextElement.FontSizeProperty, Math.Max(1, Math.Round(style.FontSize, MidpointRounding.AwayFromZero))); TextEditor.Selection.ApplyPropertyValue(TextElement.ForegroundProperty, Ui.Brush(style.Foreground)); TextEditor.Selection.Select(TextEditor.Document.ContentEnd, TextEditor.Document.ContentEnd); } QueueSave(); Flush(); ApplyAppearance(); }
         }
         private ContextMenu Menu()
         {
@@ -332,7 +343,7 @@ namespace DeskPins.App
             m.Items.Add(Ui.Item("卷起", () => ToggleRoll(), Host.ShortcutFor("roll"), Note.Rolled));
             m.Items.Add(Ui.Item("锁定内容", () => Toggle("lock"), Host.ShortcutFor("lock"), Note.Locked));
             var opacity = Ui.Sub("不透明度");
-            foreach (var percent in new[] { 100, 90, 80, 70, 60, 50, 40, 30, 20 }) { var value = percent; opacity.Items.Add(Ui.Item(value + "%", () => { showOpacity = true; Note.Opacity = value / 100d; Host.Library.Save(Note); ApplyAppearance(); }, "", Math.Abs(Note.Opacity - value / 100d) < .01)); }
+            foreach (var percent in new[] { 100, 90, 80, 70, 60, 50, 40, 30, 20 }) { var value = percent; opacity.Items.Add(Ui.Item(value + "%", () => { Note.Opacity = value / 100d; Host.Library.Save(Note); ApplyAppearance(); }, "", Math.Abs(Note.Opacity - value / 100d) < .01)); }
             m.Items.Add(opacity);
             m.Items.Add(new Separator());
             m.Items.Add(Ui.Item("闹钟…", () => Run("alarm"), Host.ShortcutFor("alarm")));

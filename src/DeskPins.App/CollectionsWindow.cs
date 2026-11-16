@@ -191,20 +191,105 @@ namespace DeskPins.App
             return Uri.CheckHostName(host) != UriHostNameType.Unknown;
         }
     }
-    public sealed class StackWindow : Window
+    public sealed class StackDockWindow : Window
     {
-        public readonly NoteStack Stack;
+        private const double HeaderHeight = 22, RowHeight = 30;
         private readonly AppHost host;
-        private readonly TextBlock caption;
-        public StackWindow(AppHost host, NoteStack stack)
+        private readonly StackPanel rows;
+        private readonly Grid header;
+        private readonly Border pinIndicator;
+        private readonly TextBlock headerCaption;
+        private readonly Border root;
+        private readonly MenuItem topmostItem, minimalItem;
+        public StackDockWindow(AppHost host)
         {
-            this.host = host; Stack = stack; Title = Ui.Text("DeskPins 堆叠") + " · " + stack.Name; Width = Math.Max(100, stack.Width); Height = Math.Max(32, stack.Height); MinWidth = 100; MinHeight = 32; WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize; ShowInTaskbar = false; ShowActivated = false; Left = stack.Left; Top = stack.Top; Topmost = stack.Topmost;
-            caption = new TextBlock { Text = stack.Name, FontSize = 13, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10), TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = stack.Name }; Content = new Border { Background = Ui.Brush(stack.Color), BorderBrush = System.Windows.Media.Brushes.DimGray, BorderThickness = new Thickness(1), Child = caption }; MouseLeftButtonDown += (s, e) => { if (e.ClickCount == 2) { Toggle(); return; } double x = Left, y = Top; try { DragMove(); } catch (InvalidOperationException) { } if ((System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Shift) != 0) foreach (var n in host.Library.Notes.Values.Where(n => n.StackId == Stack.Id)) { n.Left += Left - x; n.Top += Top - y; host.ReloadPosition(n); host.Library.Save(n); } Stack.Left = Left; Stack.Top = Top; host.Library.SaveCatalog(); }; SourceInitialized += (s, e) => Native.ToolWindow(this);
-            var menu = new ContextMenu(); menu.Items.Add(Ui.Item("展开 / 收拢", Toggle, "Space")); menu.Items.Add(Ui.Item("重命名…", () => { var name = Ui.Ask("堆叠名称", "名称", Stack.Name); if (name != null) { Stack.Name = name; host.Library.SaveCatalog(); Refresh(); } })); menu.Items.Add(Ui.Item("颜色…", () => { var color = Ui.Color(Stack.Color); if (color != null) { Stack.Color = color; host.Library.SaveCatalog(); Refresh(); } })); menu.Items.Add(Ui.Item("置顶", () => { Stack.Topmost = !Stack.Topmost; Topmost = Stack.Topmost; host.Library.SaveCatalog(); }, "", Stack.Topmost)); menu.Items.Add(Ui.Item("关闭堆叠（保留便签）", () => { foreach (var n in host.Library.Notes.Values.Where(n => n.StackId == Stack.Id)) { n.StackId = ""; host.Library.Save(n); } host.Library.Catalog.Stacks.Remove(Stack); host.Library.SaveCatalog(); })); menu.Items.Add(Ui.Item("关闭堆叠内便签", () => { foreach (var n in host.Library.Notes.Values.Where(n => n.StackId == Stack.Id).ToArray()) host.Library.Move(n, NoteState.Closed); })); ContextMenu = menu; PreviewKeyDown += (s, e) => { if (e.Key == System.Windows.Input.Key.Space) Toggle(); };
-            WindowResize.Attach(this, 100, 32, null, null, () => { Stack.Width = Width; Stack.Height = Height; host.Library.SaveCatalog(); });
+            this.host = host; var catalog = host.Library.Catalog;
+            Title = Ui.Text("DeskPins 堆叠"); WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize; ShowInTaskbar = false; ShowActivated = false; AllowsTransparency = true; Background = System.Windows.Media.Brushes.Transparent;
+            MinWidth = 40; MinHeight = 40; Width = Math.Max(40, catalog.StackDockWidth);
+            var position = Native.Clamp(new Rect(catalog.StackDockLeft, catalog.StackDockTop, Width, 60)); Left = position.Left; Top = position.Top; Topmost = catalog.StackDockTopmost;
+            rows = new StackPanel();
+            pinIndicator = new Border { Width = 6 };
+            headerCaption = new TextBlock { FontSize = 11, Foreground = System.Windows.Media.Brushes.White, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis };
+            header = new Grid { Height = HeaderHeight, Cursor = Cursors.SizeAll };
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) }); header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            header.Children.Add(pinIndicator); Grid.SetColumn(headerCaption, 1); header.Children.Add(headerCaption);
+            header.MouseLeftButtonDown += (s, e) => { try { DragMove(); } catch (InvalidOperationException) { } var c = host.Library.Catalog; c.StackDockLeft = Left; c.StackDockTop = Top; host.Library.SaveCatalog(); };
+            var layout = new Grid(); layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(HeaderHeight) }); layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.Children.Add(header); Grid.SetRow(rows, 1); layout.Children.Add(rows);
+            root = new Border { Background = System.Windows.Media.Brushes.White, BorderBrush = System.Windows.Media.Brushes.DimGray, BorderThickness = new Thickness(1), Child = layout };
+            Content = root;
+            Activated += (s, e) => UpdateHeaderChrome(); Deactivated += (s, e) => UpdateHeaderChrome();
+            var menu = new ContextMenu();
+            menu.Items.Add(Ui.Item("全部展开", () => { foreach (var stack in host.Library.Catalog.Stacks) stack.Expanded = true; host.Library.SaveCatalog(); }));
+            menu.Items.Add(Ui.Item("全部收拢", () => { foreach (var stack in host.Library.Catalog.Stacks) stack.Expanded = false; host.Library.SaveCatalog(); }));
+            minimalItem = Ui.Item("极简模式（隐藏名称）", () => { var c = host.Library.Catalog; c.StackDockMinimal = !c.StackDockMinimal; host.Library.SaveCatalog(); });
+            menu.Items.Add(minimalItem);
+            menu.Items.Add(new Separator());
+            topmostItem = Ui.Item("置顶堆叠面板", () => { var c = host.Library.Catalog; c.StackDockTopmost = !c.StackDockTopmost; Topmost = c.StackDockTopmost; host.Library.SaveCatalog(); });
+            menu.Items.Add(topmostItem); ContextMenu = menu;
+            SourceInitialized += (s, e) => Native.ToolWindow(this);
+            WindowResize.Attach(this, 40, 40, () => false, null, () => { host.Library.Catalog.StackDockWidth = Width; host.Library.SaveCatalog(); FitHeight(); });
         }
-        private void Toggle() { Stack.Expanded = !Stack.Expanded; host.Library.SaveCatalog(); }
-        public void BringForward() { if (!IsVisible) Show(); Topmost = Stack.Topmost; Native.RaiseNoActivate(this); }
-        public void Refresh() { caption.Text = (Stack.Expanded ? "▾ " : "▸ ") + Stack.Name + " (" + host.Library.Notes.Values.Count(n => n.StackId == Stack.Id) + ")"; caption.ToolTip = Stack.Name; Topmost = Stack.Topmost; ((MenuItem)ContextMenu.Items[3]).IsChecked = Stack.Topmost; var border = (Border)Content; border.Background = Ui.Brush(Stack.Color); border.Effect = Ui.NoteShadow(host.Library.Catalog.Settings.ShowShadow); }
+        public void Refresh()
+        {
+            var catalog = host.Library.Catalog;
+            rows.Children.Clear();
+            foreach (var stack in catalog.Stacks) rows.Children.Add(BuildRow(stack));
+            headerCaption.Text = Ui.Text("堆叠") + " · " + catalog.Stacks.Count;
+            headerCaption.Visibility = catalog.StackDockMinimal ? Visibility.Collapsed : Visibility.Visible;
+            Topmost = catalog.StackDockTopmost;
+            topmostItem.IsChecked = catalog.StackDockTopmost;
+            minimalItem.IsChecked = catalog.StackDockMinimal;
+            root.Effect = Ui.NoteShadow(catalog.Settings.ShowShadow);
+            UpdateHeaderChrome();
+            FitHeight();
+        }
+        public void BringForward() { if (!IsVisible) Show(); Topmost = host.Library.Catalog.StackDockTopmost; Native.RaiseNoActivate(this); }
+        private void UpdateHeaderChrome()
+        {
+            var brush = Ui.Brush(IsActive ? "#476F94" : "#6B6B6B");
+            header.Background = brush;
+            pinIndicator.Background = host.Library.Catalog.StackDockTopmost ? Ui.Brush("#9CC3E5") : brush;
+        }
+        private void FitHeight() { Height = HeaderHeight + host.Library.Catalog.Stacks.Count * RowHeight + 6; }
+        private void Toggle(NoteStack stack) { stack.Expanded = !stack.Expanded; host.Library.SaveCatalog(); }
+        // 展开行用组色掺白的浅底表达状态；颜色非法时退回白色，避免面板崩溃。
+        private static string TintHex(string color, double amount)
+        {
+            try
+            {
+                var c = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(color);
+                Func<byte, byte> mix = v => (byte)Math.Round(v * amount + 255 * (1 - amount));
+                return "#" + mix(c.R).ToString("X2") + mix(c.G).ToString("X2") + mix(c.B).ToString("X2");
+            }
+            catch (FormatException) { return "#FFFFFF"; }
+        }
+        private Border BuildRow(NoteStack stack)
+        {
+            var minimal = host.Library.Catalog.StackDockMinimal;
+            var count = host.Library.Notes.Values.Count(n => n.StackId == stack.Id);
+            var swatch = new Border { Width = 10, Height = 10, Background = Ui.Brush(stack.Color), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(7, 0, 0, 0) };
+            var title = new TextBlock { Text = stack.Name, FontSize = 12, Foreground = Ui.Brush("#333333"), FontWeight = stack.Expanded ? FontWeights.SemiBold : FontWeights.Normal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(7, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis, Visibility = minimal ? Visibility.Collapsed : Visibility.Visible };
+            var badge = new TextBlock { Text = count.ToString(), FontSize = 10, Foreground = Ui.Brush("#8A8F98"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(5, 0, 0, 0), Visibility = minimal ? Visibility.Collapsed : Visibility.Visible };
+            var chevron = new TextBlock { Text = stack.Expanded ? "▼" : "▶", FontSize = stack.Expanded ? 12 : 11, Foreground = Ui.Brush(stack.Expanded ? "#333333" : "#8A8F98"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(5, 0, 8, 0) };
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.Children.Add(swatch); Grid.SetColumn(title, 1); grid.Children.Add(title); Grid.SetColumn(badge, 2); grid.Children.Add(badge); Grid.SetColumn(chevron, 3); grid.Children.Add(chevron);
+            var rest = stack.Expanded ? Ui.Brush(TintHex(stack.Color, .22)) : System.Windows.Media.Brushes.Transparent;
+            var hover = stack.Expanded ? Ui.Brush(TintHex(stack.Color, .34)) : Ui.Brush("#EFEFEF");
+            var row = new Border { Height = RowHeight - 2, Margin = new Thickness(4, 1, 4, 1), Background = rest, Cursor = Cursors.Hand, Child = grid, ToolTip = stack.Name + " · " + count + " " + Ui.Text("张便签") };
+            row.MouseEnter += (s, e) => row.Background = hover;
+            row.MouseLeave += (s, e) => row.Background = rest;
+            row.MouseLeftButtonUp += (s, e) => Toggle(stack);
+            var menu = new ContextMenu();
+            menu.Items.Add(Ui.Item("展开 / 收拢", () => Toggle(stack)));
+            menu.Items.Add(Ui.Item("重命名…", () => { var name = Ui.Ask("堆叠名称", "名称", stack.Name); if (name != null) { stack.Name = name; host.Library.SaveCatalog(); } }));
+            menu.Items.Add(Ui.Item("颜色…", () => { var color = Ui.Color(stack.Color); if (color != null) { stack.Color = color; host.Library.SaveCatalog(); } }));
+            menu.Items.Add(new Separator());
+            menu.Items.Add(Ui.Item("关闭堆叠（保留便签）", () => { foreach (var n in host.Library.Notes.Values.Where(n => n.StackId == stack.Id)) { n.StackId = ""; host.Library.Save(n); } host.Library.Catalog.Stacks.Remove(stack); host.Library.SaveCatalog(); }));
+            menu.Items.Add(Ui.Item("关闭堆叠内便签", () => { foreach (var n in host.Library.Notes.Values.Where(n => n.StackId == stack.Id).ToArray()) host.Library.Move(n, NoteState.Closed); }));
+            row.ContextMenu = menu;
+            return row;
+        }
     }
 }

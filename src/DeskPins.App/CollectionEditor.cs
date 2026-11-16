@@ -50,13 +50,6 @@ namespace DeskPins.App
                 Ui.Field(panel, "颜色", colorRow);
             }
 
-            CheckBox topmost = null;
-            if (stack != null)
-            {
-                topmost = new CheckBox { Content = Ui.Text("置顶"), IsChecked = stack.Topmost, Margin = new Thickness(2, 12, 2, 4) };
-                panel.Children.Add(topmost);
-            }
-
             var save = Ui.PrimaryButton("保存", () =>
             {
                 var value = (name.Text ?? "").Trim();
@@ -67,7 +60,7 @@ namespace DeskPins.App
                     if (selected == null || selected.Id == folder.Id || IsUnder(host, selected.Id, folder.Id)) { ValidationError(window, parent, "文件夹不能循环嵌套。"); return; }
                     folder.Name = value; folder.ParentId = selected.Id;
                 }
-                else if (stack != null) { stack.Name = value; stack.Color = color; stack.Topmost = topmost.IsChecked == true; }
+                else if (stack != null) { stack.Name = value; stack.Color = color; }
                 else if (tag != null) { tag.Name = value; tag.Color = color; }
                 window.DialogResult = true;
             });

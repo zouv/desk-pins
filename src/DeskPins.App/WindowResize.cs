@@ -6,7 +6,7 @@ using System.Windows.Media;
 namespace DeskPins.App
 {
     /// <summary>
-    /// Manual border resizing for borderless WPF windows (NoteWindow and StackWindow).
+    /// Manual border resizing for borderless WPF windows (NoteWindow and StackDockWindow).
     /// ResizeMode.NoResize deliberately stays in place: the frame is drawn by the app,
     /// so native non-client hit testing is not available.
     /// </summary>

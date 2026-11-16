@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Text;
@@ -84,6 +85,12 @@ namespace DeskPins.Core
         [DataMember] public string Id = Guid.NewGuid().ToString("N"), Name = "新堆叠", Color = "#FFFFB4";
         [DataMember] public double Left = 100, Top = 100, Width = 180, Height = 44;
         [DataMember] public bool Expanded, Topmost;
+        public static readonly string[] Palette = { "#E57373", "#F06292", "#BA68C8", "#7986CB", "#64B5F6", "#4DB6AC", "#81C784", "#FFD54F", "#FF8A65", "#A1887F" };
+        public static string AutoColor(IEnumerable<NoteStack> stacks)
+        {
+            var used = new HashSet<string>(stacks.Where(s => !string.IsNullOrEmpty(s.Color)).Select(s => s.Color));
+            return Palette.FirstOrDefault(c => !used.Contains(c)) ?? Palette[used.Count % Palette.Length];
+        }
     }
     [DataContract]
     public sealed class Tag
@@ -112,7 +119,7 @@ namespace DeskPins.Core
     public sealed class Settings
     {
         [DataMember] public int Version = 3;
-        [DataMember] public bool Snap = true, OpaqueEditing = true, DoubleClickRoll = true, PreventDuplicates = true;
+        [DataMember] public bool Snap = true, DoubleClickRoll = true, PreventDuplicates = true;
         [DataMember] public bool AlarmFlash = true, AlarmJiggle, AlarmLoop, Networking, UseDns, EmailEnabled, AutoStart, CompactList;
         [DataMember] public int SnoozeMinutes = 5, NetworkPort = 52673, SmtpPort = 587, BackupHours = 24, ClosedRetentionDays = 0;
         [DataMember] public bool SmtpSsl = true;
@@ -149,7 +156,7 @@ namespace DeskPins.Core
         [DataMember] public bool ClickMakesVisible = true;
         [DataMember] public int SnapDistance = 10, SnapGap = 2;
         [DataMember] public string DoubleClickAction = "none";
-        [DataMember] public bool RolledDifferentPosition, LockPreventsMove, RestoreOpacityAfterEditing, KeepOnScreen;
+        [DataMember] public bool RolledDifferentPosition, LockPreventsMove, KeepOnScreen;
         [DataMember] public string DefaultFontName = "Verdana";
         [DataMember] public double DefaultFontSize = 10, ZoomMinFontSize = 5, ZoomMaxFontSize = 150;
         public void Normalize()
@@ -225,7 +232,19 @@ namespace DeskPins.Core
         [DataMember] public List<NoteStack> Stacks = new List<NoteStack>();
         [DataMember] public List<Tag> Tags = new List<Tag>();
         [DataMember] public List<Friend> Friends = new List<Friend>();
-        public void Normalize() { if (Settings == null) Settings = new Settings(); Settings.Normalize(); if (Folders == null) Folders = new List<Folder>(); if (Stacks == null) Stacks = new List<NoteStack>(); if (Tags == null) Tags = new List<Tag>(); if (Friends == null) Friends = new List<Friend>(); foreach (var stack in Stacks) { if (stack.Width < 100) stack.Width = 180; if (stack.Height < 32) stack.Height = 44; } }
+        [DataMember] public double StackDockLeft = 40, StackDockTop = 40, StackDockWidth = 170;
+        [DataMember] public bool StackDockTopmost, StackDockMinimal;
+        public void Normalize()
+        {
+            if (Settings == null) Settings = new Settings(); Settings.Normalize(); if (Folders == null) Folders = new List<Folder>(); if (Stacks == null) Stacks = new List<NoteStack>(); if (Tags == null) Tags = new List<Tag>(); if (Friends == null) Friends = new List<Friend>();
+            var assigned = new HashSet<string>(Stacks.Where(s => !string.IsNullOrEmpty(s.Color) && s.Color != "#FFFFB4").Select(s => s.Color));
+            foreach (var stack in Stacks)
+            {
+                if (string.IsNullOrEmpty(stack.Color) || stack.Color == "#FFFFB4") { stack.Color = NoteStack.Palette.FirstOrDefault(c => !assigned.Contains(c)) ?? NoteStack.Palette[assigned.Count % NoteStack.Palette.Length]; assigned.Add(stack.Color); }
+                if (stack.Width < 100) stack.Width = 180; if (stack.Height < 32) stack.Height = 44;
+            }
+            if (StackDockWidth < 40) StackDockWidth = 40;
+        }
     }
     public static class Json
     {
