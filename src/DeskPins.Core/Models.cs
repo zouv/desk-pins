@@ -24,7 +24,7 @@ namespace DeskPins.Core
         [DataMember] public double Left = 140, Top = 140, Width = 260, Height = 190, ExpandedHeight = 190;
         [DataMember] public double? ExpandedLeft, ExpandedTop, RolledLeft, RolledTop;
         [DataMember] public string Color = "#FFFFB4", Foreground = "#000000", FontName = "Verdana";
-        [DataMember] public double FontSize = 13.333, Opacity = 1;
+        [DataMember] public double FontSize = 10, Opacity = 1;
         [DataMember] public bool Topmost, Rolled, Locked, Ghost, Secret, Scrollbar, Stand, Encrypted;
         [DataMember] public string FolderId = "", StackId = "", RecurrenceSourceId = "", Source = "", SkinPath = "";
         [DataMember] public int SourcePort = 52673;
@@ -103,10 +103,10 @@ namespace DeskPins.Core
     public sealed class NoteStyle
     {
         [DataMember] public string Name = "默认", Color = "#FFFFB4", Foreground = "#000000", FontName = "Verdana";
-        [DataMember] public double FontSize = 13.333, Opacity = 1;
+        [DataMember] public double FontSize = 10, Opacity = 1;
         [DataMember] public int TabWidth = 50;
         [DataMember] public bool Topmost;
-        public void Apply(Note n) { n.Color = Color; n.Foreground = Foreground; n.FontName = FontName; n.FontSize = FontSize; n.Opacity = Opacity; n.Topmost = Topmost; }
+        public void Apply(Note n) { n.Color = Color; n.Foreground = Foreground; n.FontName = FontName; n.FontSize = Math.Max(1, Math.Round(FontSize, MidpointRounding.AwayFromZero)); n.Opacity = Opacity; n.Topmost = Topmost; }
     }
     [DataContract]
     public sealed class Settings
@@ -150,6 +150,8 @@ namespace DeskPins.Core
         [DataMember] public int SnapDistance = 10, SnapGap = 2;
         [DataMember] public string DoubleClickAction = "none";
         [DataMember] public bool RolledDifferentPosition, LockPreventsMove, RestoreOpacityAfterEditing, KeepOnScreen;
+        [DataMember] public string DefaultFontName = "Verdana";
+        [DataMember] public double DefaultFontSize = 10, ZoomMinFontSize = 5, ZoomMaxFontSize = 150;
         public void Normalize()
         {
             if (LastBackupUtc == DateTime.MinValue) LastBackupUtc = DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc);
@@ -187,6 +189,13 @@ namespace DeskPins.Core
             TomorrowMinute = Math.Max(0, Math.Min(59, TomorrowMinute));
             NetworkPort = Math.Max(1, Math.Min(65535, NetworkPort)); SnoozeMinutes = Math.Max(1, SnoozeMinutes);
             TomorrowHour = Math.Max(0, Math.Min(23, TomorrowHour));
+            if (string.IsNullOrWhiteSpace(DefaultFontName)) DefaultFontName = "Verdana";
+            if (double.IsNaN(DefaultFontSize) || double.IsInfinity(DefaultFontSize) || DefaultFontSize <= 0) DefaultFontSize = 10;
+            DefaultFontSize = Math.Max(1, Math.Min(200, Math.Round(DefaultFontSize, MidpointRounding.AwayFromZero)));
+            if (double.IsNaN(ZoomMinFontSize) || double.IsInfinity(ZoomMinFontSize) || ZoomMinFontSize <= 0) ZoomMinFontSize = 5;
+            if (double.IsNaN(ZoomMaxFontSize) || double.IsInfinity(ZoomMaxFontSize) || ZoomMaxFontSize <= 0) ZoomMaxFontSize = 150;
+            ZoomMinFontSize = Math.Max(1, Math.Min(200, Math.Round(ZoomMinFontSize, MidpointRounding.AwayFromZero))); ZoomMaxFontSize = Math.Max(1, Math.Min(200, Math.Round(ZoomMaxFontSize, MidpointRounding.AwayFromZero)));
+            if (ZoomMaxFontSize < ZoomMinFontSize) { double minimum = ZoomMaxFontSize; ZoomMaxFontSize = ZoomMinFontSize; ZoomMinFontSize = minimum; }
             if (Version < 2)
             {
                 // Upgrade old catalogs without turning every new option into false/zero.

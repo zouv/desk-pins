@@ -201,6 +201,7 @@ namespace DeskPins.App
             Grid.SetRow(content, 1);
             layout.Children.Add(content);
             pageHost.Content = layout;
+            UiTheme.QueueThinScrollBars(this);
         }
 
         private FrameworkElement BuildCategoryPage()
@@ -287,11 +288,20 @@ namespace DeskPins.App
         private void BuildAppearancePage(Panel panel)
         {
             var grid = SettingsGrid();
+            AddSection(grid, "新建便签");
+            var fontChoices = Fonts.SystemFontFamilies.Select(f => new Choice(f.Source, f.Source)).OrderBy(c => c.Label).ToList();
+            if (!fontChoices.Any(c => c.Code == settings.DefaultFontName)) fontChoices.Insert(0, new Choice(settings.DefaultFontName, settings.DefaultFontName));
+            var defaultFont = ChoiceBox(fontChoices, settings.DefaultFontName, v => { settings.DefaultFontName = v; fields["DefaultFontName"].Raw = v; fields["DefaultFontName"].Check(); });
+            fields["DefaultFontName"].Control = defaultFont;
+            AddRow(grid, "默认字体", defaultFont);
+            NumberControl(grid, "DefaultFontSize", "默认字号（px）", (int)settings.DefaultFontSize, v => settings.DefaultFontSize = v, 1, 200, 70);
+            AddHintRow(grid, "用于桌面和管理器新建便签；不影响已有便签。");
+            AddSection(grid, "便签样式");
             int current = Math.Max(0, Math.Min(selectedStyle, settings.Styles.Count - 1));
             var styleItems = new System.Collections.ObjectModel.ObservableCollection<string>(settings.Styles.Select((style, i) => StyleLabel(i)));
             var styles = new ComboBox { ItemsSource = styleItems, SelectedIndex = current, MinHeight = 30 };
             AddRow(grid, "样式", styles);
-            AddHintRow(grid, "第一项是新建便签使用的默认样式；其他样式可从便签菜单应用。");
+            AddHintRow(grid, "第一项控制新建便签的颜色等其他样式；字体和字号使用上方默认设置。");
             var name = TextControl(StyleKey(current, "Name"));
             AddRow(grid, "名称", name);
             Action updateSample = null;
@@ -399,6 +409,10 @@ namespace DeskPins.App
             SwitchRow(grid, "文本中的链接可以点击", settings.LinksClickable, v => settings.LinksClickable = v);
             SwitchRow(grid, "插入复选框时额外留一个空格", settings.CheckboxTrailingSpace, v => settings.CheckboxTrailingSpace = v);
             SwitchRow(grid, "同时按下 Shift 和 Ctrl 切换文字方向", settings.ShiftCtrlDirection, v => settings.ShiftCtrlDirection = v);
+            AddSection(grid, "Ctrl+滚轮缩放");
+            NumberControl(grid, "ZoomMinFontSize", "最小字号（px）", (int)settings.ZoomMinFontSize, v => settings.ZoomMinFontSize = v, 1, 200, 70);
+            NumberControl(grid, "ZoomMaxFontSize", "最大字号（px）", (int)settings.ZoomMaxFontSize, v => settings.ZoomMaxFontSize = v, 1, 200, 70);
+            AddHintRow(grid, "仅影响文本内容；图片便签仍按既有比例缩放。");
             AddSection(grid, "高亮颜色");
             var palette = new WrapPanel();
             for (int i = 0; i < 7; i++)
@@ -983,6 +997,11 @@ namespace DeskPins.App
             RegisterNumber("TomorrowMinute", "明天唤醒分钟", 4, settings.TomorrowMinute, v => settings.TomorrowMinute = v, 0, 59);
             RegisterNumber("SnoozeMinutes", "稍后提醒分钟数", 4, settings.SnoozeMinutes, v => settings.SnoozeMinutes = v, 1, 1440);
             RegisterNumber("ImageUndoLevels", "图片撤销层数", 3, settings.ImageUndoLevels, v => settings.ImageUndoLevels = v, 1, 40);
+            RegisterText("DefaultFontName", "默认字体", 2, settings.DefaultFontName, v => settings.DefaultFontName = v);
+            fields["DefaultFontName"].Validate = raw => string.IsNullOrWhiteSpace(raw) ? Ui.Text("字体名称不能为空。") : null;
+            RegisterNumber("DefaultFontSize", "默认字号（px）", 2, (int)settings.DefaultFontSize, v => settings.DefaultFontSize = v, 1, 200);
+            RegisterNumber("ZoomMinFontSize", "最小字号（px）", 3, (int)settings.ZoomMinFontSize, v => settings.ZoomMinFontSize = v, 1, 200);
+            RegisterNumber("ZoomMaxFontSize", "最大字号（px）", 3, (int)settings.ZoomMaxFontSize, v => settings.ZoomMaxFontSize = v, 1, 200);
             RegisterNumber("NetworkPort", "监听端口", 5, settings.NetworkPort, v => settings.NetworkPort = v, 1, 65535);
             RegisterNumber("SmtpPort", "端口", 6, settings.SmtpPort, v => settings.SmtpPort = v, 1, 65535);
             RegisterText("TransferFile", "传输文件", 0, settings.TransferFile, v => settings.TransferFile = v);

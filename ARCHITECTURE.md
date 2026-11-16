@@ -20,8 +20,8 @@ WPF 便签 / 管理 / 设置
 
 | 任务 | 首读 | 可忽略 |
 |---|---|---|
-| 便签编辑和窗口行为 | NoteWindow.cs、TextEditor.cs、ImageEditor.cs、Native.cs、WindowResize.cs | 通信与迁移 |
-| 公共 UI、弹框与菜单 | UiTheme.cs、Ui.cs、CollectionEditor.cs、CollectionsWindow.cs、ScheduleWindow.cs、AboutWindow.cs；菜单见 NoteWindow.Menu / TextMenu / ImageMenu、AppHost.BuildTray | 图片算法与通信协议 |
+| 便签编辑和窗口行为 | NoteWindow.cs、TextEditor.cs、TextFormatWindow.cs、ImageEditor.cs、Native.cs、WindowResize.cs | 通信与迁移 |
+| 公共 UI、弹框与菜单 | UiTheme.cs、Ui.cs、TextFormatWindow.cs、CollectionEditor.cs、CollectionsWindow.cs、ScheduleWindow.cs、AboutWindow.cs；菜单见 NoteWindow.Menu / TextMenu / ImageMenu、AppHost.BuildTray | 图片算法与通信协议 |
 | 设置草稿、校验与分项应用 | SettingsWindow.cs、SettingsFieldState.cs、AppHost.ValidateSettings / ApplySettingsReport、Ui.cs、Localization.cs | 通信协议与迁移 |
 | 屏幕截取 / 从屏幕新建图片便签 | CaptureWindow.cs、AppHost.Capture | 通信与迁移 |
 | 状态、保存、加密和事务 | NoteLibrary.cs、NoteRepository.cs、Models.cs、Crypto.cs | 皮肤和通信 |
@@ -68,6 +68,7 @@ WPF 便签 / 管理 / 设置
 | src/DeskPins.App/Localization.cs | 内置中英文资源；自定义 JSON 语言文件继续由 Ui.LoadLanguage 读取 |
 | src/DeskPins.App/DataLocation.cs | 默认 / 自定义数据目录解析与 `%LOCALAPPDATA%/DeskPins/data-directory.txt` 指针文件 |
 | src/DeskPins.App/WindowResize.cs | 无边框便签 / 堆叠窗口的边缘拖拽缩放与最小尺寸计算 |
+| src/DeskPins.App/TextFormatWindow.cs | 选区 / 全文格式窗口：仅应用显式修改的字体、整数 px 字号、样式、颜色与高亮，保留混合格式 |
 | tests/DeskPins.Tests/ | 无第三方框架的 STA 回归；自建临时数据，结束后清理 |
 | scripts/、manager.sh、*.bat | 构建、运行、打包、性能测量与关闭运行实例的统一入口 |
 | assets/ | 自制图标和 JSON 皮肤示例 |
@@ -78,15 +79,15 @@ WPF 便签 / 管理 / 设置
 | 任务 | 入口 |
 |---|---|
 | 启动 / 单实例 / 命令行 | Program.Main、ApiService.Identity / Client |
-| 新建 / 显隐 / 托盘 | AppHost.Start / New / Sync / BuildTray / BuildTrayMenu / SetHidden / ToggleManage |
-| 编辑 / 格式 / 窗口 | NoteWindow.Run / HandleKeyDown / Flush、TextEditor.Format / Read / Write |
+| 新建 / 显隐 / 托盘 | AppHost.Start / New / Sync / ToggleAll / ShowAllNotes / BuildTray / BuildTrayMenu / SetHidden / ToggleManage |
+| 编辑 / 格式 / 窗口 | NoteWindow.Run / HandleKeyDown / Zoom / TextMenu / Flush、TextEditor.Format / FontDialog / Scale / Read / Write、TextFormatWindow.ApplyChanges |
 | 图片算法 | ImageEditor.BeginStroke / ContinueStroke / CommitStroke / CancelEdit / Transform / Crop / ResizeImage、RasterCanvas |
 | 屏幕截取 | AppHost.Capture、CaptureWindow 构造 / Result |
 | 关于窗口 | AboutWindow 构造 / VersionText、AppHost.BuildTray 的“关于 DeskPins”菜单项 |
-| 公共弹框 / 按钮 / 菜单 | UiTheme.Apply / ButtonStyle / ComboBoxStyle、Ui.DialogContent / FitDialog / ActiveWindow / PrimaryButton / DangerButton / Item；NoteWindow.Menu / TextMenu / ImageMenu |
+| 公共弹框 / 按钮 / 菜单 / 滚动条 | UiTheme.Apply / ApplyThinScrollBars / QueueThinScrollBars / ButtonStyle / ComboBoxStyle、Ui.DialogContent / FitDialog / ActiveWindow / PrimaryButton / DangerButton / Item；NoteWindow.Menu / TextMenu / ImageMenu |
 | 状态转换 / 加密 / 重载 | NoteLibrary.Move / Sleep / Load / Save / SetFolderEncrypted / Reload |
 | 管理布局与预览 | ManagerWindow.Refresh / DisplaySelected / OpenSelected / RestoreSelected / UpdateSelectionSummary / ConstrainPaneWidths / SavePaneWidths / ResizeOutlinePane / PaneSplitter / SelectCategory / ScrollRailToSelection / QueueThinScrollBars / IconButton |
-| 管理编辑 / 菜单 / 状态 | ManagerWindow.SaveEditor / FlushPending / EditNoteTitle / BeginInlineTitleEdit / ShowNoteProperties / Context / SaveManagerState / RestoreManagerState |
+| 管理编辑 / 菜单 / 状态 | ManagerWindow.SaveEditor / QueueEditorSave / ZoomPreview / FlushPending / EditNoteTitle / BeginInlineTitleEdit / ShowNoteProperties / Context / SaveManagerState / RestoreManagerState |
 | 管理导航与集合 | ManagerWindow.BuildTree / CreateCollectionItem / BeginInlineCollectionRename / EditCollection / DeleteCollection / MoveCollectionItem / NewNoteIn / DropTo / NodeDrop |
 | 管理器日历 | ManagerWindow.BuildCalendar / BuildCalendarView / CalendarDay / FocusCalendarDate / MatchesDate |
 | 管理器搜索 | ManagerWindow.BuildFindBar / UpdateSearchSummary / ResetSearch / RefreshSearch / SearchResults / OpenSearchTagFilter、SearchTagWindow |
@@ -119,8 +120,12 @@ WPF 便签 / 管理 / 设置
 - 便签标题拖动期间 MoveSelected 只同步组内窗口；DragMove 返回后才由 SnapAfterDrag 按屏幕 / 其他便签边缘吸附，避免连续吸附把小幅拖动拉回原位。SnapAfterDrag 移动全部选中窗口；按住 Alt 反向切换吸附。
 - 堆叠窗口读取 NoteStack.Topmost，AppHost.NewStack 沿用来源便签的 Topmost；窗口设置 ShowActivated=false。选中或激活便签时 AppHost.BringStacksForward 用 SetWindowPos(NOACTIVATE) 把全部堆叠抬到最前，确保未置顶堆叠被其他窗口遮盖后仍可见。
 - TextEditor 在 FlowDocument.Resources 注入 Paragraph Margin=0 隐式样式，并在 Read / TextChanged 归一化段落边距，避免 Paragraph 自动边距形成多余空行。
+- NoteWindow.Zoom 与 ManagerWindow.ZoomPreview 分别统一桌面便签 / 管理器预览的 Ctrl+滚轮缩放：有选区只缩放选区，无选区缩放全文；TextEditor.Scale 按连续文本段读取原字号，ScaledSize 每段固定增减 1px、分别限制范围，保留混合字号的相对大小，逆序应用后恢复选区。Read 在 RTF 加载后把各段字号归一化为整数 px。右上角 Tip 显示 1200ms，统一字号显示整数、混合字号显示整数 px 范围，不抢焦点或鼠标；管理器缩放走 QueueEditorSave 自动保存，图片仍使用原比例范围。
+- 新建便签统一经过 NoteLibrary.Create：先用 Styles[0] 应用颜色等其他样式，再以 Settings.DefaultFontName / DefaultFontSize 覆盖字体和字号，因此桌面、API 与管理器入口一致，已有便签不受影响。
+- TextEditor.FontDialog 打开 TextFormatWindow；无选区目标为全文，有选区只处理选区。对话框以 dirty 标志保证只有显式修改的属性才应用，混合值和第三态复选框保持不变；下划线 / 删除线共用 Inline.TextDecorationsProperty，ApplyDecoration 按文本段保留另一种装饰。NoteWindow 在右键位于现有选区内时拦截 RichTextBox 的右键按下默认行为，避免选区折叠后再生成格式菜单。
+- AppHost.ToggleAll / ShowAllNotes 共用 visibilityChanging 重入保护。隐藏关闭活动便签时，下一张便签的 Activated 不会借 ClickMakesVisible 撤销本次隐藏。
 - NoteWindow 的 OpaqueEditing 只对活动便签强制不透明；用户从右键改透明度或应用样式时 showOpacity 临时绕过，失焦后清除。RestoreOpacityAfterEditing 决定失焦立即恢复还是以 180ms 淡出恢复保存的透明度。
-- 管理便签为 88px 图标 + 小字导轨与动态工作区：30px 图标下是居中 11px 说明，英文长标签保留至少 68px 文字宽度，分类 10 使用本地化“搜索结果”；Tag 保存稳定分类 id。桌面排除附着 / 堆叠，附着分类显示全部 Attachment != null（含当前可见项）。Home 每行保留分类文字，合计按唯一便签 Id 去重。卡片日期固定为“修改于 + ModifiedUtc”。Stored / Stacks / Tags 显示大纲 + 卡片列表 + 内容三栏，其余分类显示卡片列表 + 内容两栏，Home 为仪表盘；预览分栏 MinWidth=245，保证最小窗口仍有内容空间。导轨视觉顺序由 CategoryOrder 决定，不要用 SelectedIndex 当分类 id。列表头部第 1 行是分类标题 + 右对齐计数，第 2 行是图标操作组 + 右对齐排序下拉（宽度按最长文案 80–96px）；预览元信息与操作按钮同一行、按钮靠右。大纲列首次访问使用星号 Fill，之后按分类保存的像素宽度恢复；窗口变宽时未拖拽的首次布局与预览分担剩余空间。三条集合分类的大纲选中行使用 Selected 浅色背景。管理器滚动条统一为 11px，Loaded / Refresh / DisplaySelected 后由 QueueThinScrollBars 合并扫描实际 ScrollBar，不再用 LayoutUpdated 全树扫描。树 / 列表计数写入快照，避免预览保存时反复清空选择。ScrollRailToSelection 在筛选、搜索栏展开或导轨尺寸变化后把当前分类滚入可见。
+- 管理便签为 88px 图标 + 小字导轨与动态工作区：30px 图标下是居中 11px 说明，英文长标签保留至少 68px 文字宽度，分类 10 使用本地化“搜索结果”；Tag 保存稳定分类 id。桌面排除附着 / 堆叠，附着分类显示全部 Attachment != null（含当前可见项）。Home 每行保留分类文字，合计按唯一便签 Id 去重。卡片日期固定为“修改于 + ModifiedUtc”。Stored / Stacks / Tags 显示大纲 + 卡片列表 + 内容三栏，其余分类显示卡片列表 + 内容两栏，Home 为仪表盘；预览分栏 MinWidth=245，保证最小窗口仍有内容空间。导轨视觉顺序由 CategoryOrder 决定，不要用 SelectedIndex 当分类 id。列表头部第 1 行是分类标题 + 右对齐计数，第 2 行是图标操作组 + 右对齐排序下拉（宽度按最长文案 80–96px）；预览元信息与操作按钮同一行、按钮靠右。大纲列首次访问使用星号 Fill，之后按分类保存的像素宽度恢复；窗口变宽时未拖拽的首次布局与预览分担剩余空间。三条集合分类的大纲选中行使用 Selected 浅色背景。管理器滚动条统一为 6px，Loaded / Refresh / DisplaySelected 后由 QueueThinScrollBars 合并调度 UiTheme.ApplyThinScrollBars，不再用 LayoutUpdated 全树扫描。树 / 列表计数写入快照，避免预览保存时反复清空选择。ScrollRailToSelection 在筛选、搜索栏展开或导轨尺寸变化后把当前分类滚入可见。
 - 第一分隔条使用自定义 Thumb + ResizeOutlinePane，只同时调整大纲和列表且保持两者总宽不变，第二分隔条与预览不动；大纲最小 100px、列表最小 260px。第二分隔条仍用 GridSplitter 调整列表与预览。不要换回两个 GridSplitter 的 PreviousAndNext 组合，否则拖动第一条时第二条会跟着移动。
 - 集合大纲由 Catalog 列表顺序驱动，三个集合分类都有 Tag="all" 的“全部”节点，选中后清空筛选且禁用属性 / 删除。拖拽排序移动 Folders / Stacks / Tags 列表项；文件夹节点上 / 下 1/4 排序，中间 1/2 改 ParentId，禁止自身 / 后代。DeskPins.Collection 与 DeskPins.Notes 分流；属性走 CollectionEditor，行内改名走 BeginInlineCollectionRename，删除后清筛选并重建树。
 - 日历由 ManagerWindow.Calendar 自绘，月份 / 星期按 Ui.CurrentLanguage 本地化，计数和列表共用 MatchesDate。月历固定为紧凑 6 周并直接放入日历宿主，不嵌套 ScrollViewer；CalendarDay 支持方向键、PageUp / PageDown 和 Home，FocusCalendarDate 恢复焦点。
@@ -132,8 +137,8 @@ WPF 便签 / 管理 / 设置
 - 数据目录：ValidateDataDirectory 只检查路径与已有库，不创建目录 / 数据库 / 指针；ApplyDataDirectory 对空目标用 SQLite Backup 复制，对已有库只切换，再写指针供重启。SettingsWindow 只在 pendingDataDirectory 不同于成功应用基线时调用；选回当前运行目录也必须更新指针。
 - 快捷键统一走 Ui.TryParseGesture / FormatGesture：支持无修饰普通键与 F1–F24；全局快捷键保存时必须带修饰键或功能键。全局新建 / 显隐 / 管理分别注册 HotKey ID 1 / 2 / 3；其中管理是 toggle：管理器前台时关闭，后台或未打开时打开。
 - 公共弹框：Ui.DialogContent 提供滚动正文与固定按钮页脚，FitDialog 限工作区并为非任务栏窗口补活动 Owner；PrimaryButton / DangerButton 区分主要 / 危险动作，确认默认 No。输入框在 Loaded 后 Dispatcher 聚焦 / 全选；集合、联系人、提醒、附着验证失败定位字段，危险动作独立并明确后果。ScheduleWindow 仅对已有休眠 / 重复或闹钟显示“现有提醒”清除区。
-- 菜单按需生成：Ui.Item 接收 check / enabled；NoteWindow.Menu 首层保留常用操作，将整理、显示行为、导出传输分别收进二级菜单并保留快捷键，仍标明关闭可恢复、永久删除及传输后关闭；Alt+F4 只关闭当前便签（进入 Closed），不退出应用。TextMenu / ImageMenu 按锁定、选择、剪贴板和 CanUndo / CanRedo 启停相应操作。BuildTray 分新建、显隐 / 管理、工具与退出组；数据维护只在设置页。
-- 设置表单：Appearance 使用样式下拉 + 颜色 / 字体 / 透明度 / Tab 宽度 / 示例 / 阴影 / 皮肤；Content 管理链接、复选框、Shift+Ctrl 方向、7 个高亮色和图片行为；Alerts 管理唤醒默认值、声音文件与响铃；Desktop 管理启动隐藏、关闭确认、吸附距离 / 间隙和双击标题栏行为。快捷键搜索有持久可见标签；设置标签列 220px，开关整行可点击且文字不重复触发，导航与开关模板提供键盘焦点反馈。
+- 菜单按需生成：Ui.Item 接收 check / enabled；NoteWindow.Menu 首层保留常用操作，将整理、显示行为、导出传输分别收进二级菜单并保留快捷键，仍标明关闭可恢复、永久删除及传输后关闭；Alt+F4 只关闭当前便签（进入 Closed），不退出应用。TextMenu 按选区动态显示所选文字 / 全文格式，段落、插入和高亮分组，按锁定、选择、剪贴板状态启停；ImageMenu 按锁定、选择、剪贴板和 CanUndo / CanRedo 启停。BuildTray 分新建、显隐 / 管理、工具与退出组；数据维护只在设置页。
+- 设置表单：Appearance 顶部设置新建便签默认字体 / 整数 px 字号，样式下拉管理颜色 / 字体样式 / 透明度 / Tab 宽度 / 示例 / 阴影 / 皮肤（第一项的字体与字号不再用于新建便签）；Content 管理链接、复选框、Shift+Ctrl 方向、Ctrl+滚轮字号范围、7 个高亮色和图片行为；Alerts 管理唤醒默认值、声音文件与响铃；Desktop 管理启动隐藏、关闭确认、吸附距离 / 间隙和双击标题栏行为。快捷键搜索有持久可见标签；设置标签列 220px，开关整行可点击且文字不重复触发，导航与开关模板提供键盘焦点反馈。
 
 ## 4. 接口契约
 
@@ -153,8 +158,9 @@ WPF 便签 / 管理 / 设置
 - AppHost.ApplySteps 接收命名 Action 序列并返回错误列表，单项失败不中断循环；ApplySettingsReport 返回运行期应用错误，testMode 下不做外部应用。错误不表示 Catalog 提交失败，也不自动回滚已提交设置。
 - AppHost.ValidateDatabase 用只读 Sqlite 检查 quick_check、user_version、便签 Id / 元数据和 Catalog；不证明目标目录可写。RestoreBackup 返回用户确认后的恢复结果；RestoreBackupData 不弹确认，返回唯一保护备份路径，合并 / 选择恢复同 Id 会覆盖当前版本，完整恢复替换便签与设置。
 - NoteLibrary.Reload 先在局部完整读取 Catalog 与按 Id 建立元数据字典，再更新 Catalog / Notes 并清 SessionPassword；读取或重复 Id 失败保持旧内存。ImportBackup 已提交后 Reload 失败必须关闭 Repository，旧内存不能继续写回。
-- UiTheme.Apply 只修改目标窗口及其 Resources；Ui.DialogContent 的按钮不随正文滚动。UiTheme.ComboBoxStyle 提供平面边框、居中文本和自绘 Popup/ComboBoxItem，供管理器排序使用。Ui.Item 的 check=null 表示非勾选菜单，enabled 决定可用性；ImageEditor.CanUndo / CanRedo 同时检查 Locked 与各自历史栈。
+- UiTheme.Apply 设置目标窗口 Resources，并在 Loaded 后统一实际 ScrollBar 尺寸；动态内容用 QueueThinScrollBars 合并调度。Ui.DialogContent 的按钮不随正文滚动。UiTheme.ComboBoxStyle 提供平面边框、居中文本和自绘 Popup/ComboBoxItem，供管理器排序使用。Ui.Item 的 check=null 表示非勾选菜单，enabled 决定可用性；ImageEditor.CanUndo / CanRedo 同时检查 Locked 与各自历史栈。
 - Settings.Version：Catalog 升级时 Normalize 从旧版本补齐新增选项（链接、阴影、高亮色、吸附距离、图片类型等）；不要只看字段默认值，旧 JSON 缺字段会得到 false/0。Version < 3 会补开六个搜索范围、SearchContent 和 SearchBarExpanded。
+- Settings.DefaultFontName / DefaultFontSize 只用于 NoteLibrary.Create 新建便签，默认 Verdana / 10px；DefaultFontSize 与 ZoomMinFontSize / ZoomMaxFontSize 均按整数 px 持久化，范围 1–200，缩放范围默认 5 / 150。Normalize 将旧小数四舍五入（远离零）、补默认值并交换反向缩放范围；ValidateSettings 拒绝非整数。TextEditor.Scale 接收 delta 与 px 范围，返回缩放后最小 / 最大 px Tuple；RTF 以 0.5 pt 精度存储，因此 Read 后必须归一化各段为整数 px，保存往返不承诺保留旧小数值。
 - Settings.Search*：SearchDesktop / SearchAttached / SearchStored / SearchSleeping / SearchClosed / SearchRecurring 是搜索范围，SearchContent 控制是否查正文，SearchPinFindBar 让查找栏在其他分类也可见，SearchBarExpanded 记住折叠状态，SearchTagFilter 保存标签 id（任一匹配）。
 - Settings.Shortcuts：空字符串表示停用该应用内快捷键；DisabledShortcuts 保存停用前的手势，仅用于设置界面恢复显示，不参与键盘分发。GlobalNewKey / GlobalToggleKey / GlobalManageKey 为空同样表示关闭。
 - 数据目录不在 Catalog 内：DataLocation 的指针文件决定下次启动目录；`--data-dir` 命令行优先，显式参数会覆盖指针。
@@ -200,6 +206,8 @@ WPF 便签 / 管理 / 设置
 - 设置窗口必须是非模态任务栏窗口（ShowInTaskbar=true + Show）；ShowDialog / Owner 会让便签无法编辑和选中。
 - 自动吸附只在 DragMove 返回后执行；不要在 MouseMove 中实时吸附加回窗口，否则小幅拖动会看起来“拖不动”。
 - Paragraph 的 Margin 可能是 Auto 或由 RTF 显式带入；TextEditor 必须用隐式样式和归一化保持 0，否则会出现多余空行。
+- RichTextBox 右键按下可能折叠现有选区；若点击位置在选区内，NoteWindow 必须先保留选区再打开 TextMenu，否则“设置所选文字格式”会错误退化为全文格式。TextFormatWindow 不要直接覆盖整个 TextDecorationsProperty，否则设置下划线会清除删除线，反之亦然。
+- WPF 字号在此功能中直接按 px 使用，不再做 pt × 4/3 换算；RTF 的半磅量化会在读回时产生 .333 / .667 等小数字号，只在 Tip 格式化不够，Read 后必须按文本段取整。
 - 堆叠窗口 ShowActivated=false，前置用 SetWindowPos(NOACTIVATE)，不能抢走便签焦点；NoteWindow 的 OpaqueEditing 对活动窗口强制不透明，用户显式改透明度时用 showOpacity 临时绕过。失焦恢复透明前清除旧 Opacity 动画；RestoreOpacityAfterEditing=false 使用 180ms 淡出，true 立即恢复，不要让设置只保存而不参与运行行为。
 - 数据目录是启动级配置，不替换运行 Repository。预检只读，不保证可写；保存后空目标复制，已有库不覆盖。目录是否需应用比较成功写指针基线而非运行目录；从 B 选回运行目录 A 仍要写指针，无变化保存不得写指针。
 - 设置提交与外部应用不是一个事务：Catalog 成功后开机启动 / 目录 / 热键 / 网络等仍可能失败，必须分别报告并允许重试，取消不撤销提交；恢复 / 导入 / 维护不以取消设置回滚。
@@ -215,10 +223,11 @@ WPF 便签 / 管理 / 设置
 - WPF 绑定不读公共字段。管理器卡片新增展示字段时用属性（如 ManagerTitle / Identifier / DisplayTags、Tag.DisplayName / ColorHex），字段只用于序列化或内部计算。
 - 日历与搜索是同一套筛选的两处呈现：日格计数与日历列表必须共用 MatchesDate；搜索的范围 / 标签 / 正文开关必须同时作用于 SearchResults，不要在 Refresh 的 switch 里另外拼一套条件。月历不要套内部 ScrollViewer：用 26px 日格和 32px 月份栏固定 6 周，最小窗口仍要让便签列表 ≥120px。
 - 管理器操作按钮统一用 IconButton（32×30、图标 + ToolTip + 自动化名称），不要恢复尺寸不一的文字按钮组；空态 CTA 与搜索按钮保留文字，查找栏重置/展开使用图标。排序下拉必须使用 UiTheme.ComboBoxStyle（平面边框、居中文本、自绘 Popup 和菜单项），否则会退回系统灰色下拉样式；新增操作时同时检查列表、大纲、预览三行是否各自单行对齐。
-- ScrollViewer 默认模板会给 ScrollBar 写入系统 17px 宽度，单靠隐式 Style 的 Width setter 不生效；ManagerWindow.ApplyThinScrollBars 把实际 ScrollBar 的 Width / Height 设为 11px，QueueThinScrollBars 只在 Loaded / Refresh / DisplaySelected 后合并调度，避免 LayoutUpdated 每次布局都全树扫描。不要把“细滚动条”只做成 UiTheme 样式而不验证 ActualWidth。
+- ScrollViewer 默认模板会给 ScrollBar 写入系统 17px 宽度，单靠隐式 Style 的 Width setter 不生效；UiTheme.ApplyThinScrollBars 把实际 ScrollBar 的 Width / Height 设为 UiTheme.ThinScrollBarSize（当前 6px），由 UiTheme.Apply 在窗口 Loaded 接入，NoteWindow 创建编辑器和 SettingsWindow 切页后补充调度，ManagerWindow.QueueThinScrollBars 在 Loaded / Refresh / DisplaySelected 后合并调度。不要把“细滚动条”只做成 UiTheme 样式而不验证可见 ScrollBar 的 ActualWidth / ActualHeight。
 - 分类宽度 / 选中 / 筛选在切换前由 SaveCategoryState 写入 Settings，切换后再 RestoreCategoryState / RefreshCore 恢复；只靠关闭时 SaveManagerState 会导致切回分类重置。首次访问无保存宽度才 Fill，之后恢复像素值。
 - 管理器的集合大纲使用自定义 TreeViewItem 模板：默认模板的系统选中色会覆盖样式 Background，必须由模板的 Bd 触发器绘制 Selected 浅色背景；展开按钮绑定 IsExpanded，叶子节点隐藏。显式创建的 TreeViewItem 也要赋 Style（只设 ItemContainerStyle 不够），否则子目录会用默认模板导致计数列不对齐；缩进通过每层 Padding 实现，ItemsPresenter 不再加左边距，计数才能统一贴右。不要只改 ItemContainerStyle 的 Background 就宣称选中色已改。
 - 快捷键格式不要只用 KeyGestureConverter：它拒绝无修饰的普通字符键。统一使用 Ui.TryParseGesture / FormatGesture；全局快捷键必须带修饰键或功能键。
 - 快捷键启停以空手势表达，不要用“删除自定义项”表示停用，否则会退回默认手势并重新生效。
+- 批量显隐必须覆盖整个 Sync / 窗口关闭过程，而不是只保护显示方向：活动便签关闭会同步激活下一张，ClickMakesVisible 的 Activated → ShowAllNotes 会抵消首次隐藏；ToggleAll / ShowAllNotes 共用 visibilityChanging，不能在 Activated 里另加延时绕过。
 - UI 测试使用 `new AppHost(..., testMode: true)`；`Focus` / `BringForward` / `ToggleAll` / `ShowAllNotes` / `BringStacksForward` 等会 `Show()` 窗口的路径必须尊重 `testMode`，否则 `package.bat` 跑 UI 回归时会闪一下便签窗口。
 - 便签窗口必须同时设置 `WindowStyle=None` 与 `AllowsTransparency=true`，`Window.Opacity` 才会通过 WPF 分层窗口生效；不要再通过 `SetLayeredWindowAttributes` 手动改非透明窗口的 alpha（WPF 会重置 `WS_EX_LAYERED`）。`Native.SetGhost` 只负责 `WS_EX_TRANSPARENT`。

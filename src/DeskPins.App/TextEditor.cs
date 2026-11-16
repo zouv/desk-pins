@@ -54,12 +54,13 @@ namespace DeskPins.App
         }
         public void Read(Note n)
         {
-            Document = new FlowDocument { PagePadding = new Thickness(0), FontFamily = new FontFamily(n.FontName), FontSize = n.FontSize };
+            Document = new FlowDocument { PagePadding = new Thickness(0), FontFamily = new FontFamily(n.FontName), FontSize = IntegerSize(n.FontSize) };
             ApplyParagraphStyle(Document);
             var range = new TextRange(Document.ContentStart, Document.ContentEnd);
             if (n.Body != null && n.Body.Length > 0) { using (var s = new MemoryStream(n.Body)) { try { range.Load(s, DataFormats.Rtf); } catch (ArgumentException) { range.Text = n.PlainText ?? Encoding.UTF8.GetString(n.Body); } } }
             else range.Text = n.PlainText ?? "";
             NormalizeParagraphMargins();
+            NormalizeIntegerSizes();
             Foreground = Ui.Brush(n.Foreground); IsReadOnly = n.Locked;
         }
         public void Write(Note n)
@@ -106,18 +107,83 @@ namespace DeskPins.App
         }
         public void FontDialog()
         {
-            using (var d = new System.Windows.Forms.FontDialog { ShowColor = true, Font = new System.Drawing.Font(FontFamily.Source, (float)(FontSize * .75)) })
+            if (IsReadOnly) return;
+            var dialog = new TextFormatWindow(this) { Owner = Window.GetWindow(this) };
+            if (dialog.ShowDialog() == true) Focus();
+        }
+        private static double IntegerSize(double size) { return Math.Max(1, Math.Round(size, MidpointRounding.AwayFromZero)); }
+        private static double ScaledSize(double size, int delta, double minimum, double maximum)
+        {
+            int scaled = (int)IntegerSize(size) + (delta > 0 ? 1 : -1);
+            return Math.Max(minimum, Math.Min(maximum, scaled));
+        }
+        private static System.Collections.Generic.List<Tuple<TextPointer, TextPointer, double>> FontSegments(TextRange range)
+        {
+            var segments = new System.Collections.Generic.List<Tuple<TextPointer, TextPointer, double>>();
+            var position = range.Start;
+            while (position.CompareTo(range.End) < 0)
             {
-                if (d.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
-                var range = Selection.IsEmpty ? new TextRange(Document.ContentStart, Document.ContentEnd) : Selection;
-                range.ApplyPropertyValue(TextElement.FontFamilyProperty, new FontFamily(d.Font.Name)); range.ApplyPropertyValue(TextElement.FontSizeProperty, (double)d.Font.Size * 4 / 3);
-                range.ApplyPropertyValue(TextElement.FontWeightProperty, d.Font.Bold ? FontWeights.Bold : FontWeights.Normal); range.ApplyPropertyValue(TextElement.FontStyleProperty, d.Font.Italic ? FontStyles.Italic : FontStyles.Normal);
-                range.ApplyPropertyValue(TextElement.ForegroundProperty, Ui.Brush(System.Drawing.ColorTranslator.ToHtml(d.Color)));
+                TextPointer next;
+                if (position.GetPointerContext(LogicalDirection.Forward) == TextPointerContext.Text)
+                {
+                    next = position.GetPositionAtOffset(position.GetTextInRun(LogicalDirection.Forward).Length) ?? range.End;
+                    if (next.CompareTo(range.End) > 0) next = range.End;
+                    object current = position.Parent.GetValue(TextElement.FontSizeProperty);
+                    double size = current is double ? (double)current : range.GetPropertyValue(TextElement.FontSizeProperty) is double ? (double)range.GetPropertyValue(TextElement.FontSizeProperty) : 10;
+                    if (next.CompareTo(position) > 0) segments.Add(Tuple.Create(position, next, size));
+                }
+                else
+                {
+                    next = position.GetNextContextPosition(LogicalDirection.Forward) ?? range.End;
+                    if (next.CompareTo(range.End) > 0) next = range.End;
+                }
+                if (next.CompareTo(position) <= 0) break;
+                position = next;
+            }
+            return segments;
+        }
+        private void NormalizeIntegerSizes()
+        {
+            var range = new TextRange(Document.ContentStart, Document.ContentEnd);
+            var segments = FontSegments(range);
+            for (int i = segments.Count - 1; i >= 0; i--)
+            {
+                var segment = segments[i];
+                new TextRange(segment.Item1, segment.Item2).ApplyPropertyValue(TextElement.FontSizeProperty, IntegerSize(segment.Item3));
             }
         }
-        public void Scale(double factor)
+        public Tuple<double, double> Scale(int delta, double minimum, double maximum)
         {
-            if (IsReadOnly) return; var range = Selection.IsEmpty ? new TextRange(Document.ContentStart, Document.ContentEnd) : Selection; object current = range.GetPropertyValue(TextElement.FontSizeProperty); double size = current is double ? (double)current : FontSize; range.ApplyPropertyValue(TextElement.FontSizeProperty, Math.Max(6, Math.Min(200, size * factor)));
+            bool hadSelection = !Selection.IsEmpty;
+            var range = hadSelection ? new TextRange(Selection.Start, Selection.End) : new TextRange(Document.ContentStart, Document.ContentEnd);
+            var caret = CaretPosition;
+            var segments = FontSegments(range);
+            if (segments.Count == 0)
+            {
+                object current = range.GetPropertyValue(TextElement.FontSizeProperty);
+                double size = current is double ? (double)current : Document.FontSize;
+                if (!IsReadOnly) size = ScaledSize(size, delta, minimum, maximum);
+                if (!IsReadOnly) range.ApplyPropertyValue(TextElement.FontSizeProperty, size);
+                return Tuple.Create(size, size);
+            }
+            double smallest = double.MaxValue, largest = double.MinValue;
+            foreach (var segment in segments)
+            {
+                double size = IsReadOnly ? segment.Item3 : ScaledSize(segment.Item3, delta, minimum, maximum);
+                smallest = Math.Min(smallest, size); largest = Math.Max(largest, size);
+            }
+            if (!IsReadOnly)
+            {
+                for (int i = segments.Count - 1; i >= 0; i--)
+                {
+                    var segment = segments[i];
+                    double size = ScaledSize(segment.Item3, delta, minimum, maximum);
+                    new TextRange(segment.Item1, segment.Item2).ApplyPropertyValue(TextElement.FontSizeProperty, size);
+                }
+                if (hadSelection) Selection.Select(range.Start, range.End);
+                else if (caret != null) CaretPosition = caret;
+            }
+            return Tuple.Create(smallest, largest);
         }
         public void Highlight(string color)
         {

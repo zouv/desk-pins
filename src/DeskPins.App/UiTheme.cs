@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -34,9 +35,34 @@ namespace DeskPins.App
             combo.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(6, 3, 6, 3)));
             combo.Setters.Add(new Setter(Control.ForegroundProperty, Text));
             window.Resources[typeof(ComboBox)] = combo;
+            window.Resources[typeof(ScrollBar)] = ThinScrollBarStyle();
+            window.Loaded -= ThinScrollBarsLoaded;
+            window.Loaded += ThinScrollBarsLoaded;
         }
 
-        internal const double ThinScrollBarSize = 11d;
+        internal const double ThinScrollBarSize = 6d;
+
+        private static void ThinScrollBarsLoaded(object sender, RoutedEventArgs e) { ApplyThinScrollBars((Window)sender); }
+
+        public static void QueueThinScrollBars(DependencyObject root)
+        {
+            root.Dispatcher.BeginInvoke(new System.Action(() => ApplyThinScrollBars(root)), System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+
+        public static void ApplyThinScrollBars(DependencyObject root)
+        {
+            foreach (var bar in Visuals(root).OfType<ScrollBar>())
+            {
+                if (bar.Orientation == Orientation.Vertical) { bar.MinWidth = ThinScrollBarSize; bar.Width = ThinScrollBarSize; }
+                else { bar.MinHeight = ThinScrollBarSize; bar.Height = ThinScrollBarSize; }
+            }
+        }
+
+        private static System.Collections.Generic.IEnumerable<DependencyObject> Visuals(DependencyObject root)
+        {
+            yield return root;
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) foreach (var child in Visuals(VisualTreeHelper.GetChild(root, i))) yield return child;
+        }
 
         public static Style ThinScrollBarStyle()
         {

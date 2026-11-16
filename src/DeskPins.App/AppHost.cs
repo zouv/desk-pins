@@ -45,7 +45,7 @@ namespace DeskPins.App
         private ManagerWindow manager;
         private SettingsWindow settingsWindow;
         private string appliedLanguage;
-        private bool syncPending, hidden, disposed, startupRestoring, revealingNotes, storageFailed;
+        private bool syncPending, hidden, disposed, startupRestoring, visibilityChanging, storageFailed;
         private string solo = "";
         private TcpListener listener;
         private SoundPlayer sound;
@@ -150,20 +150,29 @@ namespace DeskPins.App
         }
         public void ShowAllNotes()
         {
-            if (revealingNotes) return;
-            revealingNotes = true;
+            if (visibilityChanging) return;
+            visibilityChanging = true;
             try
             {
                 hidden = false; solo = ""; Sync();
                 if (!testMode) foreach (var w in Windows.Values) Native.RaiseNoActivate(w);
                 BringStacksForward();
             }
-            finally { revealingNotes = false; }
+            finally { visibilityChanging = false; }
         }
         public void SaveSelected() { foreach (var id in Selected.ToArray()) { Note n; if (Library.Notes.TryGetValue(id, out n)) Library.Save(n); } }
         public void SetColor(Note n) { var c = Ui.Color(n.Color); if (c == null) return; foreach (var target in Targets(n)) { target.Color = c; Library.Save(target); } foreach (var w in Windows.Values) w.RefreshAppearance(); }
         public void Solo(Note n) { FlushAll(); solo = solo == n.Id ? "" : n.Id; Sync(); }
-        public void ToggleAll() { FlushAll(); hidden = !hidden; Sync(); if (!testMode) foreach (var w in stacks.Values) { if (hidden) w.Hide(); else w.Show(); } }
+        public void ToggleAll()
+        {
+            FlushAll(); visibilityChanging = true;
+            try
+            {
+                hidden = !hidden; Sync();
+                if (!testMode) foreach (var w in stacks.Values) { if (hidden) w.Hide(); else w.Show(); }
+            }
+            finally { visibilityChanging = false; }
+        }
         public void SetHidden(bool value) { if (hidden != value) ToggleAll(); }
         public bool Hidden { get { return hidden; } }
         public void Rescue() { foreach (var n in Library.Notes.Values.Where(n => n.State == NoteState.Desktop)) { FlushNote(n); var b = Native.Clamp(new Rect(n.Left, n.Top, n.Width, n.Height)); n.Left = b.Left; n.Top = b.Top; Library.Save(n); ReloadPosition(n); } }
@@ -238,7 +247,7 @@ namespace DeskPins.App
             if (notes.Length == 0) return; var window = new Window { Title = Ui.Text("设置标签"), Width = 380, Height = 420, WindowStartupLocation = WindowStartupLocation.CenterScreen, ShowInTaskbar = false }; var panel = new DockPanel { Margin = new Thickness(12) }; var buttons = new WrapPanel(); DockPanel.SetDock(buttons, Dock.Bottom); panel.Children.Add(buttons); var list = new StackPanel(); panel.Children.Add(new ScrollViewer { Content = list }); var checks = new Dictionary<string, CheckBox>(); Action refresh = () => { list.Children.Clear(); checks.Clear(); foreach (var t in Library.Catalog.Tags) { var c = new CheckBox { Content = t.Name, IsChecked = notes.All(n => n.Tags.Contains(t.Id)), Foreground = Ui.Brush(t.Color), Margin = new Thickness(4, 7, 4, 7) }; checks[t.Id] = c; list.Children.Add(c); } };
             Action<bool> apply = replace => { foreach (var n in notes) { if (replace) n.Tags.Clear(); foreach (var pair in checks.Where(p => p.Value.IsChecked == true)) if (!n.Tags.Contains(pair.Key)) n.Tags.Add(pair.Key); Library.Save(n); } window.Close(); }; buttons.Children.Add(Ui.Button("新增标签", () => { Collections("tags"); refresh(); })); buttons.Children.Add(Ui.Button("添加", () => apply(false))); buttons.Children.Add(Ui.Button("替换", () => apply(true))); buttons.Children.Add(Ui.Button("清空", () => { foreach (var n in notes) { n.Tags.Clear(); Library.Save(n); } window.Close(); })); refresh(); window.Content = panel; window.ShowDialog();
         }
-        public void NewStack(Note n) { var name = Ui.Ask("新建堆叠", "名称", "新堆叠"); if (name == null) return; var stack = new NoteStack { Name = name, Left = n.Left, Top = n.Top, Topmost = n.Topmost }; Library.Catalog.Stacks.Add(stack); n.StackId = stack.Id; Library.Save(n); Library.SaveCatalog(); }
+        public void NewStack(Note n) { var name = Ui.Ask("新建堆叠", "名称", Ui.Text("新堆叠")); if (name == null) return; var stack = new NoteStack { Name = name, Left = n.Left, Top = n.Top, Topmost = n.Topmost }; Library.Catalog.Stacks.Add(stack); n.StackId = stack.Id; Library.Save(n); Library.SaveCatalog(); }
         public string FolderPath(Folder f) { var result = f.Name; var visited = new HashSet<string> { f.Id }; while (f.ParentId != "") { f = Library.Catalog.Folders.FirstOrDefault(x => x.Id == f.ParentId); if (f == null || !visited.Add(f.Id)) break; result = f.Name + " / " + result; } return result; }
         public void EnsureUnlocked(Folder f) { if (f.Encrypted && Library.SessionPassword == null) Unlock(); if (f.Encrypted && Library.SessionPassword == null) throw new OperationCanceledException("未解锁加密存储。"); }
         public void Unlock() { var password = Ui.Ask("解锁加密存储", Library.Catalog.Settings.PasswordVerifier == "" ? "设置密码（请妥善保管）" : "输入密码", "", true); if (password != null) Library.Unlock(password); }
@@ -325,7 +334,7 @@ namespace DeskPins.App
             catch (Exception ex) { Ui.Error(new InvalidOperationException(Ui.Text("恢复已完成，但部分功能应用失败：") + "\n" + ex.Message)); }
             return backup;
         }
-        public void Print(NoteWindow w) { w.Flush(); var d = new PrintDialog(); if (d.ShowDialog() != true) return; if (w.TextEditor != null) { var clone = new FlowDocument(); var range = new TextRange(clone.ContentStart, clone.ContentEnd); using (var stream = new MemoryStream(w.Note.Body)) range.Load(stream, DataFormats.Rtf); clone.PageWidth = d.PrintableAreaWidth; clone.PageHeight = d.PrintableAreaHeight; clone.PagePadding = new Thickness(30); d.PrintDocument(((IDocumentPaginatorSource)clone).DocumentPaginator, "DeskPins"); } else d.PrintVisual(w.ImageEditor, "DeskPins 图片便签"); }
+        public void Print(NoteWindow w) { w.Flush(); var d = new PrintDialog(); if (d.ShowDialog() != true) return; if (w.TextEditor != null) { var clone = new FlowDocument(); var range = new TextRange(clone.ContentStart, clone.ContentEnd); using (var stream = new MemoryStream(w.Note.Body)) range.Load(stream, DataFormats.Rtf); clone.PageWidth = d.PrintableAreaWidth; clone.PageHeight = d.PrintableAreaHeight; clone.PagePadding = new Thickness(30); d.PrintDocument(((IDocumentPaginatorSource)clone).DocumentPaginator, "DeskPins"); } else d.PrintVisual(w.ImageEditor, Ui.Text("DeskPins 图片便签")); }
         public async void Send(Note n, Friend friend)
         {
             try { Library.Load(n); if (friend.Address != "") { if (!Library.Catalog.Settings.Networking) throw new InvalidOperationException("请在设置中启用网络功能。"); await Transfer.SendAsync(n, friend.Address, Library.Catalog.Settings.NetworkPort); } else if (friend.Email != "") { if (Library.Catalog.Settings.EmailViaClient) { ComposeMail(n, friend.Email); Log("已打开邮件草稿。"); return; } await SendMail(n, friend.Email); } else throw new InvalidOperationException("联系人没有地址。"); Log("便签发送成功。"); } catch (Exception ex) { Ui.Error(ex); }
@@ -417,6 +426,9 @@ namespace DeskPins.App
         {
             if (s.NetworkPort < 1 || s.NetworkPort > 65535 || s.SmtpPort < 1 || s.SmtpPort > 65535) throw new ArgumentException(Ui.Text("端口需在 1–65535 范围内。"));
             if (s.TomorrowHour < 0 || s.TomorrowHour > 23 || s.SnoozeMinutes < 1) throw new ArgumentException(Ui.Text("明天唤醒小时需为 0–23，稍后提醒分钟数需大于零。"));
+            if (string.IsNullOrWhiteSpace(s.DefaultFontName)) throw new ArgumentException(Ui.Text("字体名称不能为空。"));
+            if (double.IsNaN(s.DefaultFontSize) || double.IsInfinity(s.DefaultFontSize) || s.DefaultFontSize < 1 || s.DefaultFontSize > 200 || s.DefaultFontSize != Math.Round(s.DefaultFontSize)) throw new ArgumentException(Ui.Text("默认字号需为 1–200 px 之间的整数。"));
+            if (double.IsNaN(s.ZoomMinFontSize) || double.IsNaN(s.ZoomMaxFontSize) || double.IsInfinity(s.ZoomMinFontSize) || double.IsInfinity(s.ZoomMaxFontSize) || s.ZoomMinFontSize < 1 || s.ZoomMaxFontSize > 200 || s.ZoomMinFontSize > s.ZoomMaxFontSize || s.ZoomMinFontSize != Math.Round(s.ZoomMinFontSize) || s.ZoomMaxFontSize != Math.Round(s.ZoomMaxFontSize)) throw new ArgumentException(Ui.Text("滚轮缩放字号需在 1–200 px 之间，且最小字号不能大于最大字号。"));
             var gestures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var action in DefaultShortcuts.Keys) { string custom; string key = s.Shortcuts.TryGetValue(action, out custom) ? custom : DefaultShortcuts[action]; if (string.IsNullOrWhiteSpace(key)) continue; Key parsedKey; ModifierKeys parsedMods; if (!Ui.TryParseGesture(key, out parsedKey, out parsedMods)) throw new ArgumentException(Ui.Text("快捷键格式无效。") + key); var signature = parsedKey + ":" + parsedMods; if (!gestures.Add(signature)) throw new ArgumentException(Ui.Text("便签快捷键重复：") + key); }
             gestures.Clear(); foreach (var key in new[] { s.GlobalNewKey, s.GlobalToggleKey, s.GlobalManageKey }.Where(k => !string.IsNullOrWhiteSpace(k))) { Key parsedKey; ModifierKeys parsedMods; if (!Ui.TryParseGesture(key, out parsedKey, out parsedMods)) throw new ArgumentException(Ui.Text("快捷键格式无效。") + key); if (parsedMods == ModifierKeys.None && !(parsedKey >= Key.F1 && parsedKey <= Key.F24)) throw new ArgumentException(Ui.Text("全局快捷键必须包含修饰键或功能键。")); var signature = parsedKey + ":" + parsedMods; if (!gestures.Add(signature)) throw new ArgumentException(Ui.Text("全局快捷键不能重复。")); }

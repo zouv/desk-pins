@@ -9,7 +9,7 @@ namespace DeskPins.App
     /// <summary>About panel: product identity first, then version/author and a two-line summary.</summary>
     public sealed class AboutWindow : Window
     {
-        internal static string VersionText => typeof(AboutWindow).Assembly.GetName().Version?.ToString(3) ?? "未知";
+        internal static string VersionText => typeof(AboutWindow).Assembly.GetName().Version?.ToString(3) ?? Ui.Text("未知");
 
         public AboutWindow()
         {

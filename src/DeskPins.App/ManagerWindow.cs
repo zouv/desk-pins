@@ -34,11 +34,13 @@ namespace DeskPins.App
         private readonly GridSplitter listSplitter;
         private readonly ColumnDefinition outlineColumn, outlineSplitterColumn, listColumn, listSplitterColumn, previewColumn;
         private readonly Button outlineProperties, outlineDelete;
-        private readonly System.Windows.Threading.DispatcherTimer saveTimer;
+        private readonly System.Windows.Threading.DispatcherTimer saveTimer, fontSizeTipTimer;
         private TextEditor editor;
+        private Border fontSizeTip;
+        private TextBlock fontSizeTipText;
         private Note editing;
         private Panel inlineTitleHost;
-        private bool dirty, loading, buildingTree, outlineFitPending, preservePaneWidths, applyingThinScrollBars, thinScrollBarsQueued;
+        private bool dirty, loading, buildingTree, outlineFitPending, preservePaneWidths, thinScrollBarsQueued;
         private int paneLayoutCategory = -1;
         private int lastCategory = -1;
         private Point dragStart;
@@ -54,9 +56,9 @@ namespace DeskPins.App
         {
             this.host = host; Title = Ui.Text("DeskPins · 管理便签"); Width = 1280; Height = 760; MinWidth = 900; MinHeight = 520; WindowStartupLocation = WindowStartupLocation.CenterScreen;
             UiTheme.Apply(this);
-            Resources[typeof(ScrollBar)] = UiTheme.ThinScrollBarStyle();
             Ui.FitDialog(this, 900, 520);
             saveTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) }; saveTimer.Tick += (s, e) => { try { SaveEditor(); } catch (Exception ex) { Ui.Error(ex, this); } };
+            fontSizeTipTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) }; fontSizeTipTimer.Tick += (s, e) => { fontSizeTipTimer.Stop(); if (fontSizeTip != null) fontSizeTip.Visibility = Visibility.Collapsed; };
             var root = new Grid();
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -230,7 +232,7 @@ namespace DeskPins.App
             host.Library.Changed += Changed;
             Loaded += (s, e) => QueueThinScrollBars();
             Closing += (s, e) => { if (host.StorageFailed) return; try { SaveEditor(); SaveManagerState(); host.Library.SaveCatalog(); } catch (Exception ex) { e.Cancel = true; Ui.Error(ex, this); } };
-            Closed += (s, e) => { saveTimer.Stop(); searchTimer.Stop(); host.Library.Changed -= Changed; };
+            Closed += (s, e) => { saveTimer.Stop(); fontSizeTipTimer.Stop(); searchTimer.Stop(); host.Library.Changed -= Changed; };
             Deactivated += (s, e) => { try { SaveEditor(); } catch (Exception ex) { Ui.Error(ex, this); } };
             PreviewKeyDown += (s, e) =>
             {
@@ -315,40 +317,11 @@ namespace DeskPins.App
             return style;
         }
 
-        private static IEnumerable<DependencyObject> Visuals(DependencyObject root)
-        {
-            yield return root;
-            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) foreach (var child in Visuals(VisualTreeHelper.GetChild(root, i))) yield return child;
-        }
-
         private void QueueThinScrollBars()
         {
             if (thinScrollBarsQueued) return;
             thinScrollBarsQueued = true;
-            Dispatcher.BeginInvoke(new Action(() => { thinScrollBarsQueued = false; ApplyThinScrollBars(); }), System.Windows.Threading.DispatcherPriority.Loaded);
-        }
-
-        private void ApplyThinScrollBars()
-        {
-            if (applyingThinScrollBars) return;
-            applyingThinScrollBars = true;
-            try
-            {
-                foreach (var bar in Visuals(this).OfType<ScrollBar>())
-                {
-                    if (bar.Orientation == Orientation.Vertical)
-                    {
-                        if (bar.MinWidth != UiTheme.ThinScrollBarSize) bar.MinWidth = UiTheme.ThinScrollBarSize;
-                        if (bar.Width != UiTheme.ThinScrollBarSize) bar.Width = UiTheme.ThinScrollBarSize;
-                    }
-                    else
-                    {
-                        if (bar.MinHeight != UiTheme.ThinScrollBarSize) bar.MinHeight = UiTheme.ThinScrollBarSize;
-                        if (bar.Height != UiTheme.ThinScrollBarSize) bar.Height = UiTheme.ThinScrollBarSize;
-                    }
-                }
-            }
-            finally { applyingThinScrollBars = false; }
+            Dispatcher.BeginInvoke(new Action(() => { thinScrollBarsQueued = false; UiTheme.ApplyThinScrollBars(this); }), System.Windows.Threading.DispatcherPriority.Loaded);
         }
 
         private static Style OutlineTreeStyle()
@@ -727,7 +700,7 @@ namespace DeskPins.App
             var n = notes.SelectedItem as Note;
             if (!force && ReferenceEquals(editing, n) && n != null && (dirty || n.ModifiedUtc == displayedModifiedUtc)) return;
             QueueThinScrollBars();
-            SaveEditor(); editing = n; editor = null; saveFeedback = null; dirty = false; preview.Content = null; inlineTitleHost = null;
+            SaveEditor(); editing = n; editor = null; fontSizeTip = null; fontSizeTipText = null; saveFeedback = null; dirty = false; preview.Content = null; inlineTitleHost = null;
             if (n == null) { preview.Content = EmptyState("选择便签查看内容", "正文可在这里编辑；历史便签只有执行“恢复到桌面”才会重新显示在桌面。"); return; }
             displayedModifiedUtc = n.ModifiedUtc;
             if (n.Encrypted && host.Library.SessionPassword == null) { preview.Content = new StackPanel { Children = { new TextBlock { Text = Ui.Text("此便签已加密"), FontSize = 18, Margin = new Thickness(10) }, Ui.Button("解锁", () => { host.Unlock(); DisplaySelected(true); }) } }; return; }
@@ -759,13 +732,39 @@ namespace DeskPins.App
                 DockPanel.SetDock(infoRow, Dock.Top); panel.Children.Add(infoRow);
                 saveFeedback = new TextBlock { Text = Ui.Text(n.Kind == NoteKind.Text ? "正文可编辑，停止输入后自动保存。" : "图片仅预览；在桌面便签中编辑图片。"), Foreground = UiTheme.Muted, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 10) };
                 DockPanel.SetDock(saveFeedback, Dock.Top); panel.Children.Add(saveFeedback);
-                if (n.Kind == NoteKind.Text) { editor = new TextEditor { LinksClickable = host.Library.Catalog.Settings.LinksClickable, CheckboxTrailingSpace = host.Library.Catalog.Settings.CheckboxTrailingSpace }; editor.Read(n); editor.Background = Ui.Brush(n.Color); editor.TextChanged += (s, e) => { if (!loading) { dirty = true; saveFeedback.Text = Ui.Text("有未保存的修改…"); saveFeedback.Foreground = UiTheme.Muted; saveTimer.Stop(); saveTimer.Start(); } }; panel.Children.Add(editor); }
+                if (n.Kind == NoteKind.Text)
+                {
+                    editor = new TextEditor { LinksClickable = host.Library.Catalog.Settings.LinksClickable, CheckboxTrailingSpace = host.Library.Catalog.Settings.CheckboxTrailingSpace };
+                    editor.Read(n); editor.Background = Ui.Brush(n.Color);
+                    editor.TextChanged += (s, e) => { if (!loading) QueueEditorSave(); };
+                    editor.PreviewMouseWheel += (s, e) => { if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return; ZoomPreview(e.Delta); e.Handled = true; };
+                    var editorHost = new Grid(); editorHost.Children.Add(editor);
+                    fontSizeTipText = new TextBlock { Foreground = Brushes.White, FontSize = 11, Tag = "ManagerFontSizeTipText" };
+                    fontSizeTip = new Border { Child = fontSizeTipText, Background = Ui.Brush("#E6474747"), CornerRadius = new CornerRadius(3), Padding = new Thickness(7, 3, 7, 3), Margin = new Thickness(0, 6, 6, 0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Visibility = Visibility.Collapsed, IsHitTestVisible = false, Focusable = false, Tag = "ManagerFontSizeTip" };
+                    Panel.SetZIndex(fontSizeTip, 10); editorHost.Children.Add(fontSizeTip); panel.Children.Add(editorHost);
+                }
                 else { var image = new ImageEditor { Locked = true, MaxUndo = host.Library.Catalog.Settings.ImageUndoLevels, SaveFormat = host.Library.Catalog.Settings.ImageSaveType }; image.Read(n.Body); panel.Children.Add(new ScrollViewer { Content = image, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }); }
                 preview.Content = panel; loading = false;
             }
             catch (Exception ex) { loading = false; preview.Content = EmptyState("无法加载便签内容", ex.Message, "重试", () => DisplaySelected(true)); }
         }
 
+        private void ZoomPreview(int delta)
+        {
+            if (editor == null) return;
+            var settings = host.Library.Catalog.Settings;
+            var sizes = editor.Scale(delta, settings.ZoomMinFontSize, settings.ZoomMaxFontSize);
+            string size = sizes.Item1.ToString("0");
+            if (sizes.Item1 != sizes.Item2) size += "–" + sizes.Item2.ToString("0");
+            fontSizeTipText.Text = Ui.Text("字号：") + size + " px"; fontSizeTip.Visibility = Visibility.Visible; fontSizeTipTimer.Stop(); fontSizeTipTimer.Start();
+            QueueEditorSave();
+        }
+        private void QueueEditorSave()
+        {
+            dirty = true;
+            if (saveFeedback != null) { saveFeedback.Text = Ui.Text("有未保存的修改…"); saveFeedback.Foreground = UiTheme.Muted; }
+            saveTimer.Stop(); saveTimer.Start();
+        }
         public void FlushPending(Note note = null) { if (note == null || editing?.Id == note.Id) SaveEditor(); }
         private void EditNoteTitle(Note note)
         {

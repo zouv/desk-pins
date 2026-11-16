@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Documents;
 using System.Windows.Interop;
@@ -26,7 +27,9 @@ namespace DeskPins.App
         private readonly Grid content;
         private readonly StackPanel skinButtons;
         private string activeSkin = "";
-        private readonly DispatcherTimer saveTimer;
+        private readonly DispatcherTimer saveTimer, fontSizeTipTimer;
+        private readonly Border fontSizeTip;
+        private readonly TextBlock fontSizeTipText;
         private DispatcherTimer alarmTimer;
         private bool internalChange, closing, movingGroup, alarming, dirty, resizing, showOpacity, directionChord;
         private double oldLeft, oldTop;
@@ -35,6 +38,7 @@ namespace DeskPins.App
         public NoteWindow(AppHost host, Note note)
         {
             Host = host; Note = note; Title = "DeskPins · " + note.DisplayTitle; ShowInTaskbar = false; WindowStyle = WindowStyle.None; AllowsTransparency = true; ResizeMode = ResizeMode.NoResize; MinWidth = 100; MinHeight = 24;
+            Resources[typeof(ScrollBar)] = UiTheme.ThinScrollBarStyle(); Loaded += (s, e) => UiTheme.ApplyThinScrollBars(this);
             UseLayoutRounding = true; SnapsToDevicePixels = true; Background = Ui.Brush(note.Color);
             var root = new Grid(); root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(22) }); root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             frame = new Border { BorderThickness = new Thickness(1), BorderBrush = Brushes.DimGray, Child = root }; Content = frame;
@@ -45,15 +49,19 @@ namespace DeskPins.App
             title.MouseLeftButtonDown += DragTitle;
             title.MouseMove += (s, e) => { if (e.LeftButton == MouseButtonState.Pressed && (Keyboard.Modifiers & ModifierKeys.Control) != 0) { Flush(); var copy = Host.Library.Copy(Note); Host.Focus(copy); try { Host.Windows[copy.Id].DragMove(); } catch (InvalidOperationException) { } } }; title.MouseRightButtonUp += (s, e) => { if (alarming) { StopAlarm(true); e.Handled = true; return; } var menu = Menu(); menu.PlacementTarget = title; menu.IsOpen = true; e.Handled = true; };
             content = new Grid(); Grid.SetRow(content, 1); root.Children.Add(content);
+            fontSizeTipText = new TextBlock { Foreground = Brushes.White, FontSize = 11, Tag = "FontSizeTipText" };
+            fontSizeTip = new Border { Child = fontSizeTipText, Background = Ui.Brush("#E6474747"), CornerRadius = new CornerRadius(3), Padding = new Thickness(7, 3, 7, 3), Margin = new Thickness(0, 6, 6, 0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Visibility = Visibility.Collapsed, IsHitTestVisible = false, Tag = "FontSizeTip" };
+            Grid.SetRow(fontSizeTip, 1); Panel.SetZIndex(fontSizeTip, 10); root.Children.Add(fontSizeTip);
             saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) }; saveTimer.Tick += (s, e) => Flush();
+            fontSizeTipTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) }; fontSizeTipTimer.Tick += (s, e) => { fontSizeTipTimer.Stop(); fontSizeTip.Visibility = Visibility.Collapsed; };
             CreateEditor();
             SourceInitialized += (s, e) => { Native.ToolWindow(this); Native.SetGhost(this, Note.Ghost); };
             Activated += (s, e) => { ApplyAppearance(); if (Host.Library.Catalog.Settings.ClickMakesVisible) Host.ShowAllNotes(); Host.BringStacksForward(); }; Deactivated += (s, e) => { Flush(); showOpacity = false; ApplyAppearance(true); };
             LocationChanged += Location; SizeChanged += (s, e) => { if (internalChange || Note.Rolled) return; Note.Width = Width; Note.Height = Height; Note.ExpandedHeight = Height; QueueSave(); };
             PreviewKeyDown += HandleKeyDown; PreviewKeyUp += HandleKeyUp;
             PreviewMouseLeftButtonDown += (s, e) => { if (alarming) StopAlarm(false); };
-            PreviewMouseWheel += (s, e) => { if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return; if (TextEditor != null) TextEditor.Scale(e.Delta > 0 ? 1.1 : .9); else { ImageEditor.Scale = Math.Max(.1, Math.Min(4, ImageEditor.Scale * (e.Delta > 0 ? 1.1 : .9))); ImageEditor.InvalidateMeasure(); } QueueSave(); e.Handled = true; };
-            Closing += ClosingWindow; Closed += (s, e) => { saveTimer.Stop(); if (alarmTimer != null) alarmTimer.Stop(); };
+            PreviewMouseWheel += (s, e) => { if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return; Zoom(e.Delta); e.Handled = true; };
+            Closing += ClosingWindow; Closed += (s, e) => { saveTimer.Stop(); fontSizeTipTimer.Stop(); if (alarmTimer != null) alarmTimer.Stop(); };
             AllowDrop = true; Drop += DropFiles; ApplyModel();
             WindowResize.Attach(this, 100, 40, () => !Note.Rolled,
                 () => { resizing = true; if (alarming) StopAlarm(false); Flush(); },
@@ -66,6 +74,7 @@ namespace DeskPins.App
             if (Note.Kind == NoteKind.Text)
             {
                 TextEditor = new TextEditor(); ImageEditor = null; TextEditor.Read(Note); TextEditor.LinksClickable = Host.Library.Catalog.Settings.LinksClickable; TextEditor.CheckboxTrailingSpace = Host.Library.Catalog.Settings.CheckboxTrailingSpace; TextEditor.TextChanged += (s, e) => { if (!internalChange) { QueueSave(); Dispatcher.BeginInvoke(new Action(AutoSize), DispatcherPriority.Background); } };
+                TextEditor.PreviewMouseRightButtonDown += (s, e) => { if (TextEditor.Selection.IsEmpty) return; var position = TextEditor.GetPositionFromPoint(e.GetPosition(TextEditor), true); if (position != null && TextEditor.Selection.Start.CompareTo(position) <= 0 && TextEditor.Selection.End.CompareTo(position) >= 0) e.Handled = true; };
                 TextEditor.PreviewMouseRightButtonUp += (s, e) => { if (alarming) { StopAlarm(true); e.Handled = true; return; } var menu = TextMenu(); menu.PlacementTarget = TextEditor; menu.IsOpen = true; e.Handled = true; }; TextEditor.PreviewMouseLeftButtonDown += (s, e) => { Host.Select(null, false); };
                 content.Children.Add(TextEditor);
             }
@@ -74,6 +83,29 @@ namespace DeskPins.App
                 TextEditor = null; ImageEditor = new ImageEditor { Locked = Note.Locked, BackgroundColor = ((SolidColorBrush)Ui.Brush(Note.Color)).Color, MaxUndo = Host.Library.Catalog.Settings.ImageUndoLevels, SaveFormat = Host.Library.Catalog.Settings.ImageSaveType }; ImageEditor.Read(Note.Body); ImageEditor.Changed += () => QueueSave(); ImageEditor.PreviewMouseRightButtonUp += (s, e) => { var menu = ImageMenu(); menu.PlacementTarget = ImageEditor; menu.IsOpen = true; e.Handled = true; }; var scroll = new ScrollViewer { Content = ImageEditor, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }; content.Children.Add(scroll);
             }
             internalChange = false;
+            UiTheme.QueueThinScrollBars(this);
+        }
+        public void Zoom(int delta)
+        {
+            var settings = Host.Library.Catalog.Settings;
+            if (TextEditor != null)
+            {
+                var sizes = TextEditor.Scale(delta, settings.ZoomMinFontSize, settings.ZoomMaxFontSize);
+                ShowFontSizeTip(sizes.Item1, sizes.Item2);
+            }
+            else
+            {
+                ImageEditor.Scale = Math.Max(.1, Math.Min(4, ImageEditor.Scale * (delta > 0 ? 1.1 : .9)));
+                ImageEditor.InvalidateMeasure();
+            }
+            QueueSave();
+        }
+        private void ShowFontSizeTip(double minimum, double maximum)
+        {
+            string size = minimum.ToString("0");
+            if (minimum != maximum) size += "–" + maximum.ToString("0");
+            fontSizeTipText.Text = Ui.Text("字号：") + size + " px";
+            fontSizeTip.Visibility = Visibility.Visible; fontSizeTipTimer.Stop(); fontSizeTipTimer.Start();
         }
         public void ReloadContent() { CreateEditor(); ApplyModel(); }
         public void ApplyModel()
@@ -203,7 +235,7 @@ namespace DeskPins.App
             if (mods == ModifierKeys.Control && key == Key.F4) { Run("close"); e.Handled = true; return; }
             if (key == Key.Apps) { var menu = mods == ModifierKeys.Shift ? (TextEditor != null ? TextMenu() : ImageMenu()) : Menu(); menu.PlacementTarget = this; menu.IsOpen = true; e.Handled = true; return; }
             if (TextEditor != null && mods == ModifierKeys.Shift && key == Key.Delete) { TextEditor.DeleteLine(); e.Handled = true; return; }
-            if (mods == ModifierKeys.Control && (key == Key.OemOpenBrackets || key == Key.OemCloseBrackets || key == Key.OemMinus || key == Key.OemPlus)) { bool larger = key == Key.OemCloseBrackets || key == Key.OemPlus; if (TextEditor != null) TextEditor.Scale(larger ? 1.1 : .9); else { ImageEditor.Scale = Math.Max(.1, Math.Min(4, ImageEditor.Scale * (larger ? 1.1 : .9))); ImageEditor.InvalidateMeasure(); } QueueSave(); e.Handled = true; return; }
+            if (mods == ModifierKeys.Control && (key == Key.OemOpenBrackets || key == Key.OemCloseBrackets || key == Key.OemMinus || key == Key.OemPlus)) { bool larger = key == Key.OemCloseBrackets || key == Key.OemPlus; Zoom(larger ? 120 : -120); e.Handled = true; return; }
             string action = Host.ActionFor(key, mods);
             if (action != null) { Run(action); e.Handled = true; return; }
             if (mods == ModifierKeys.Alt && key >= Key.D0 && key <= Key.D9) { ApplyStyle((int)key - (int)Key.D0); e.Handled = true; return; }
@@ -284,8 +316,8 @@ namespace DeskPins.App
         }
         public void ApplyStyle(int index)
         {
-            var style = Host.Library.Catalog.Settings.Styles[index]; if (TextEditor != null && !TextEditor.Selection.IsEmpty) { if (Note.Locked) return; TextEditor.Selection.ApplyPropertyValue(TextElement.FontFamilyProperty, new FontFamily(style.FontName)); TextEditor.Selection.ApplyPropertyValue(TextElement.FontSizeProperty, style.FontSize); TextEditor.Selection.ApplyPropertyValue(TextElement.ForegroundProperty, Ui.Brush(style.Foreground)); QueueSave(); }
-            else { showOpacity = true; style.Apply(Note); if (TextEditor != null && !Note.Locked) { TextEditor.SelectAll(); TextEditor.Selection.ApplyPropertyValue(TextElement.FontFamilyProperty, new FontFamily(style.FontName)); TextEditor.Selection.ApplyPropertyValue(TextElement.FontSizeProperty, style.FontSize); TextEditor.Selection.ApplyPropertyValue(TextElement.ForegroundProperty, Ui.Brush(style.Foreground)); TextEditor.Selection.Select(TextEditor.Document.ContentEnd, TextEditor.Document.ContentEnd); } QueueSave(); Flush(); ApplyAppearance(); }
+            var style = Host.Library.Catalog.Settings.Styles[index]; if (TextEditor != null && !TextEditor.Selection.IsEmpty) { if (Note.Locked) return; TextEditor.Selection.ApplyPropertyValue(TextElement.FontFamilyProperty, new FontFamily(style.FontName)); TextEditor.Selection.ApplyPropertyValue(TextElement.FontSizeProperty, Math.Max(1, Math.Round(style.FontSize, MidpointRounding.AwayFromZero))); TextEditor.Selection.ApplyPropertyValue(TextElement.ForegroundProperty, Ui.Brush(style.Foreground)); QueueSave(); }
+            else { showOpacity = true; style.Apply(Note); if (TextEditor != null && !Note.Locked) { TextEditor.SelectAll(); TextEditor.Selection.ApplyPropertyValue(TextElement.FontFamilyProperty, new FontFamily(style.FontName)); TextEditor.Selection.ApplyPropertyValue(TextElement.FontSizeProperty, Math.Max(1, Math.Round(style.FontSize, MidpointRounding.AwayFromZero))); TextEditor.Selection.ApplyPropertyValue(TextElement.ForegroundProperty, Ui.Brush(style.Foreground)); TextEditor.Selection.Select(TextEditor.Document.ContentEnd, TextEditor.Document.ContentEnd); } QueueSave(); Flush(); ApplyAppearance(); }
         }
         private ContextMenu Menu()
         {
@@ -364,15 +396,27 @@ namespace DeskPins.App
         }
         private ContextMenu TextMenu()
         {
-            var m = new ContextMenu(); m.Items.Add(Ui.Item("剪切", () => TextEditor.Cut(), Host.ShortcutFor("cut"), enabled: !Note.Locked && !TextEditor.Selection.IsEmpty)); m.Items.Add(Ui.Item("复制", () => TextEditor.Copy(), Host.ShortcutFor("copy"), enabled: !TextEditor.Selection.IsEmpty)); m.Items.Add(Ui.Item("粘贴", () => Host.Paste(this), Host.ShortcutFor("paste"), enabled: !Note.Locked && (Clipboard.ContainsText() || Clipboard.ContainsImage()))); m.Items.Add(Ui.Item("粘贴为纯文本", () => Run("paste-plain"), Host.ShortcutFor("paste-plain"), enabled: !Note.Locked && Clipboard.ContainsText())); m.Items.Add(new Separator()); m.Items.Add(Ui.Item("字体…", () => TextEditor.FontDialog())); foreach (var pair in new[] { new[] { "粗体", "bold" }, new[] { "斜体", "italic" }, new[] { "下划线", "underline" }, new[] { "删除线", "strike" }, new[] { "项目符号", "bullets" }, new[] { "编号", "numbers" }, new[] { "左对齐", "left" }, new[] { "居中", "center" }, new[] { "右对齐", "right" }, new[] { "从左到右", "ltr" }, new[] { "从右到左", "rtl" }, new[] { "插入复选框", "checkbox" }, new[] { "插入链接…", "link" }, new[] { "插入日期时间", "date" } }) { var action = pair[1]; m.Items.Add(Ui.Item(pair[0], () => Run(action))); }
+            var m = new ContextMenu();
+            m.Items.Add(Ui.Item("剪切", () => TextEditor.Cut(), Host.ShortcutFor("cut"), enabled: !Note.Locked && !TextEditor.Selection.IsEmpty));
+            m.Items.Add(Ui.Item("复制", () => TextEditor.Copy(), Host.ShortcutFor("copy"), enabled: !TextEditor.Selection.IsEmpty));
+            m.Items.Add(Ui.Item("粘贴", () => Host.Paste(this), Host.ShortcutFor("paste"), enabled: !Note.Locked && (Clipboard.ContainsText() || Clipboard.ContainsImage())));
+            m.Items.Add(Ui.Item("粘贴为纯文本", () => Run("paste-plain"), Host.ShortcutFor("paste-plain"), enabled: !Note.Locked && Clipboard.ContainsText()));
+            m.Items.Add(new Separator());
+            m.Items.Add(Ui.Item(TextEditor.Selection.IsEmpty ? "设置全文格式…" : "设置所选文字格式…", () => TextEditor.FontDialog(), enabled: !Note.Locked));
+            var paragraph = Ui.Sub("段落");
+            foreach (var pair in new[] { new[] { "项目符号", "bullets" }, new[] { "编号", "numbers" }, new[] { "左对齐", "left" }, new[] { "居中", "center" }, new[] { "右对齐", "right" }, new[] { "从左到右", "ltr" }, new[] { "从右到左", "rtl" } }) { var action = pair[1]; paragraph.Items.Add(Ui.Item(pair[0], () => Run(action), enabled: !Note.Locked)); }
+            m.Items.Add(paragraph);
+            var insert = Ui.Sub("插入");
+            foreach (var pair in new[] { new[] { "插入复选框", "checkbox" }, new[] { "插入链接…", "link" }, new[] { "插入日期时间", "date" } }) { var action = pair[1]; insert.Items.Add(Ui.Item(pair[0], () => Run(action), enabled: !Note.Locked)); }
+            m.Items.Add(insert);
             m.Items.Add(Ui.Item("查找…", () => Run("find"), Host.ShortcutFor("find")));
             var highlight = Ui.Sub("高亮");
             for (int i = 0; i < Host.Library.Catalog.Settings.HighlightColors.Count && i < 7; i++)
             {
                 var color = Host.Library.Catalog.Settings.HighlightColors[i];
-                highlight.Items.Add(Ui.Item(Ui.Text("颜色") + " " + (i + 1), () => TextEditor.Highlight(color)));
+                highlight.Items.Add(Ui.Item(Ui.Text("颜色") + " " + (i + 1), () => TextEditor.Highlight(color), enabled: !Note.Locked));
             }
-            highlight.Items.Add(new Separator()); highlight.Items.Add(Ui.Item("清除高亮", () => TextEditor.Highlight(null)));
+            highlight.Items.Add(new Separator()); highlight.Items.Add(Ui.Item("清除高亮", () => TextEditor.Highlight(null), enabled: !Note.Locked));
             m.Items.Add(highlight); return m;
         }
         private ContextMenu ImageMenu()
