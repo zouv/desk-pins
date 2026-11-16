@@ -21,13 +21,14 @@ namespace DeskPins.App
             public double ScaleX = 1, ScaleY = 1;
             public Func<bool> VerticalEnabled;
             public Func<bool> ResizeEnabled;
+            public Func<Point, bool> Blocked;
             public Action Started, Completed;
             public Cursor HoverCursor;
         }
 
-        public static void Attach(Window window, double minWidth, double minHeight, Func<bool> verticalEnabled = null, Action started = null, Action completed = null, Func<bool> resizeEnabled = null)
+        public static void Attach(Window window, double minWidth, double minHeight, Func<bool> verticalEnabled = null, Action started = null, Action completed = null, Func<bool> resizeEnabled = null, Func<Point, bool> blocked = null)
         {
-            var session = new Session { Window = window, VerticalEnabled = verticalEnabled, Started = started, Completed = completed, ResizeEnabled = resizeEnabled };
+            var session = new Session { Window = window, VerticalEnabled = verticalEnabled, Started = started, Completed = completed, ResizeEnabled = resizeEnabled, Blocked = blocked };
             window.PreviewMouseLeftButtonDown += (s, e) => Start(session, e, minWidth, minHeight);
             window.PreviewMouseMove += (s, e) => Move(session, e, minWidth, minHeight);
             window.PreviewMouseLeftButtonUp += (s, e) => Finish(session, e);
@@ -42,6 +43,7 @@ namespace DeskPins.App
             if (session.ResizeEnabled != null && !session.ResizeEnabled()) return;
             var window = session.Window;
             var point = e.GetPosition(window);
+            if (session.Blocked != null && session.Blocked(point)) return;
             double width = Math.Max(1, window.ActualWidth), height = Math.Max(1, window.ActualHeight);
             double zone = 6;
             bool left = point.X <= zone, right = point.X >= width - zone;
@@ -74,6 +76,7 @@ namespace DeskPins.App
             if (!session.Active)
             {
                 var point = e.GetPosition(window);
+                if (session.Blocked != null && session.Blocked(point)) { SetHoverCursor(session, null); return; }
                 double width = Math.Max(1, window.ActualWidth), height = Math.Max(1, window.ActualHeight);
                 bool left = point.X <= 6, right = point.X >= width - 6, top = point.Y <= 6, bottom = point.Y >= height - 6;
                 if (left && right) { if (point.X < width / 2) right = false; else left = false; }

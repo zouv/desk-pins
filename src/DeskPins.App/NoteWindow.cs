@@ -30,7 +30,7 @@ namespace DeskPins.App
         private readonly Border fontSizeTip;
         private readonly TextBlock fontSizeTipText;
         private DispatcherTimer alarmTimer;
-        private bool internalChange, closing, movingGroup, alarming, dirty, resizing, directionChord;
+        private bool internalChange, closing, movingGroup, alarming, dirty, resizing, directionChord, indicatorHover;
         private double oldLeft, oldTop;
         private string lastFind = "";
         private int alarmStep;
@@ -42,7 +42,11 @@ namespace DeskPins.App
             var root = new Grid(); root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(22) }); root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             frame = new Border { BorderThickness = new Thickness(1), BorderBrush = Brushes.DimGray, Child = root }; Content = frame;
             var strip = new Grid(); strip.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) }); strip.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); strip.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); strip.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
-            indicator = new TextBlock(); strip.Children.Add(indicator); caption = new TextBlock { FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis, Foreground = Brushes.White }; Grid.SetColumn(caption, 1); strip.Children.Add(caption);
+            indicator = new TextBlock { Cursor = Cursors.Hand };
+            indicator.MouseEnter += (s, e) => { indicatorHover = true; UpdatePinIndicator(); };
+            indicator.MouseLeave += (s, e) => { indicatorHover = false; UpdatePinIndicator(); };
+            indicator.MouseLeftButtonDown += (s, e) => { e.Handled = true; if (e.ClickCount > 1) return; Toggle("top"); };
+            strip.Children.Add(indicator); caption = new TextBlock { FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis, Foreground = Brushes.White }; Grid.SetColumn(caption, 1); strip.Children.Add(caption);
             var close = new Button { Content = "×", FontSize = 15, Padding = new Thickness(0), Background = Brushes.Transparent, Foreground = Brushes.White, BorderThickness = new Thickness(0), ToolTip = Ui.Text("关闭便签（可恢复）") }; closeButton = close;
             var closeTemplate = new ControlTemplate(typeof(Button));
             var closeOuter = new FrameworkElementFactory(typeof(Border));
@@ -63,7 +67,7 @@ namespace DeskPins.App
             closeButton.Template = closeTemplate; skinButtons = new StackPanel { Orientation = Orientation.Horizontal }; Grid.SetColumn(skinButtons, 2); strip.Children.Add(skinButtons); Grid.SetColumn(close, 3); strip.Children.Add(close); close.Click += (s, e) => { Flush(); Host.CloseNotes(Note); };
             title = new Border { Child = strip }; root.Children.Add(title);
             title.MouseLeftButtonDown += DragTitle;
-            title.MouseMove += (s, e) => { if (e.LeftButton == MouseButtonState.Pressed && (Keyboard.Modifiers & ModifierKeys.Control) != 0) { Flush(); var copy = Host.Library.Copy(Note); Host.Focus(copy); try { Host.Windows[copy.Id].DragMove(); } catch (InvalidOperationException) { } } }; title.MouseRightButtonUp += (s, e) => { if (alarming) { StopAlarm(true); e.Handled = true; return; } var menu = Menu(); menu.PlacementTarget = title; menu.IsOpen = true; e.Handled = true; };
+            title.MouseMove += (s, e) => { if (!indicatorHover && e.LeftButton == MouseButtonState.Pressed && (Keyboard.Modifiers & ModifierKeys.Control) != 0) { Flush(); var copy = Host.Library.Copy(Note); Host.Focus(copy); try { Host.Windows[copy.Id].DragMove(); } catch (InvalidOperationException) { } } }; title.MouseRightButtonUp += (s, e) => { if (alarming) { StopAlarm(true); e.Handled = true; return; } var menu = Menu(); menu.PlacementTarget = title; menu.IsOpen = true; e.Handled = true; };
             content = new Grid(); Grid.SetRow(content, 1); root.Children.Add(content);
             fontSizeTipText = new TextBlock { Foreground = Brushes.White, FontSize = 11, Tag = "FontSizeTipText" };
             fontSizeTip = new Border { Child = fontSizeTipText, Background = Ui.Brush("#E6474747"), CornerRadius = new CornerRadius(3), Padding = new Thickness(7, 3, 7, 3), Margin = new Thickness(0, 6, 6, 0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Visibility = Visibility.Collapsed, IsHitTestVisible = false, Tag = "FontSizeTip" };
@@ -82,7 +86,14 @@ namespace DeskPins.App
             WindowResize.Attach(this, 100, 40, () => !Note.Rolled,
                 () => { resizing = true; if (alarming) StopAlarm(false); Flush(); },
                 () => { resizing = false; oldLeft = Left; oldTop = Top; Note.Left = Left; Note.Top = Top; Note.Width = Width; if (!Note.Rolled) Note.Height = Note.ExpandedHeight = Height; QueueSave(); Flush(); },
-                () => !(Host.Library.Catalog.Settings.LockPreventsMove && Note.Locked));
+                () => !(Host.Library.Catalog.Settings.LockPreventsMove && Note.Locked), OverPinIndicator);
+        }
+        // 左侧 6px Pin 色块与 WindowResize 的左边框热区重叠，必须让色块优先接收点击与悬停。
+        private bool OverPinIndicator(Point point)
+        {
+            if (indicator.ActualWidth <= 0 || indicator.ActualHeight <= 0) return false;
+            var origin = indicator.TranslatePoint(new Point(0, 0), this);
+            return point.X >= origin.X && point.X <= origin.X + indicator.ActualWidth && point.Y >= origin.Y && point.Y <= origin.Y + indicator.ActualHeight;
         }
         private void CreateEditor()
         {
@@ -132,9 +143,8 @@ namespace DeskPins.App
         private void ApplyAppearance()
         {
             Title = "DeskPins · " + Note.DisplayTitle; Topmost = Note.Topmost;
-            Background = content.Background = Ui.Brush(Note.Color); title.Background = IsActive ? Ui.Brush("#476F94") : Ui.Brush("#6B6B6B");
+            Background = content.Background = Ui.Brush(Note.Color); title.Background = IsActive ? Ui.Brush(UiTheme.TitleActiveColor) : Ui.Brush(UiTheme.TitleInactiveColor);
             var stack = Note.StackId == "" ? null : Host.Library.Catalog.Stacks.FirstOrDefault(s => s.Id == Note.StackId);
-            indicator.Background = Note.Topmost ? Ui.Brush("#9CC3E5") : title.Background;
             caption.Foreground = closeButton.Foreground = Brushes.White;
             closeButton.Background = stack != null ? Ui.Brush(stack.Color) : Brushes.Transparent;
             if (stack != null) closeButton.Foreground = Ui.TextOn(stack.Color);
@@ -147,6 +157,12 @@ namespace DeskPins.App
             content.Opacity = Note.Secret && !IsActive ? 0 : 1; frame.BorderBrush = Host.Selected.Contains(Note.Id) ? Brushes.DodgerBlue : Brushes.DimGray; Native.SetGhost(this, Note.Ghost);
             var path = string.IsNullOrWhiteSpace(Note.SkinPath) ? Host.Library.Catalog.Settings.SkinPath : Note.SkinPath; var skin = Host.GetSkin(path); if (activeSkin != path) { activeSkin = path; skinButtons.Children.Clear(); if (skin?.Buttons != null) foreach (var item in skin.Buttons) { var action = item.Action; var button = new Button { Content = item.Text, FontSize = 10, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Foreground = Brushes.White, Padding = new Thickness(4, 0, 4, 0), ToolTip = action }; button.Click += (s, e) => Run(action); skinButtons.Children.Add(button); } }
             if (skin != null) { title.Background = Ui.Brush(skin.TitleColor); caption.Foreground = Ui.Brush(skin.TitleTextColor); frame.BorderBrush = Ui.Brush(skin.BorderColor); }
+            UpdatePinIndicator();
+        }
+        private void UpdatePinIndicator()
+        {
+            indicator.Background = Note.Topmost ? Ui.Brush(UiTheme.PinColor) : indicatorHover ? Ui.Brush(UiTheme.PinHoverColor) : title.Background;
+            indicator.ToolTip = Ui.Text("切换置顶");
         }
         private void ApplyOpacity()
         {

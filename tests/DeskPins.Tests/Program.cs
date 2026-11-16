@@ -754,6 +754,7 @@ namespace DeskPins.Tests
             dockCatalog.StackDockWidth = 200; dockCatalog.StackDockTopmost = true;
             var dock = new StackDockWindow(host); dock.Refresh();
             Check(Math.Abs(dock.Width - 200) < .1 && dock.Topmost, "stack dock restores saved width and topmost state");
+            Check(Field<System.Windows.Controls.Grid>(dock, "header").Background == Ui.Brush(UiTheme.TitleInactiveColor), "stack dock header shares the note title palette");
             var dockRows = Field<System.Windows.Controls.StackPanel>(dock, "rows");
             Check(dockRows.Children.Count == dockCatalog.Stacks.Count, "stack dock lists every stack in one vertical panel");
             Func<System.Windows.Controls.Border> rowA = () => dockRows.Children.OfType<System.Windows.Controls.Border>().First(r => Descendants(r).OfType<System.Windows.Controls.TextBlock>().Any(t => t.Text == dockStackA.Name));
@@ -771,6 +772,20 @@ namespace DeskPins.Tests
             Check(Field<System.Windows.Controls.TextBlock>(noteWindow, "indicator").Background != Ui.Brush(dockStackA.Color), "note left indicator stays reserved for the pin state");
             noteWindow.Note.Topmost = true; noteWindow.RefreshAppearance();
             Check(Field<System.Windows.Controls.TextBlock>(noteWindow, "indicator").Background == Ui.Brush("#9CC3E5"), "note left indicator shows topmost pin state in light blue");
+            var pinBlock = Field<System.Windows.Controls.TextBlock>(noteWindow, "indicator");
+            Check(pinBlock.Cursor == System.Windows.Input.Cursors.Hand, "note pin indicator is clickable");
+            noteWindow.Note.Topmost = false; noteWindow.RefreshAppearance();
+            var idlePinBackground = pinBlock.Background;
+            pinBlock.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseEnterEvent });
+            Check(pinBlock.Background != idlePinBackground, "unpinned note pin indicator previews its action on hover");
+            pinBlock.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonDownEvent });
+            Check(noteWindow.Note.Topmost && pinBlock.Background == Ui.Brush("#9CC3E5"), "clicking the pin indicator pins the note");
+            pinBlock.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonDownEvent });
+            Check(!noteWindow.Note.Topmost, "clicking the pinned indicator unpins the note");
+            pinBlock.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseLeaveEvent });
+            Check(pinBlock.Background == Field<System.Windows.Controls.Border>(noteWindow, "title").Background, "pin indicator returns to the title bar color after hover ends");
+            var overPinIndicator = typeof(NoteWindow).GetMethod("OverPinIndicator", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Check((bool)overPinIndicator.Invoke(noteWindow, new object[] { new Point(3, 10) }) && !(bool)overPinIndicator.Invoke(noteWindow, new object[] { new Point(60, 10) }), "pin block is excluded from the left resize edge");
             noteWindow.Note.Topmost = false; noteWindow.Note.StackId = ""; noteWindow.RefreshAppearance();
             Check(Field<System.Windows.Controls.Border>(dock, "pinIndicator").Background == Ui.Brush("#9CC3E5"), "stack dock header shows pin state as a left color block");
             dockCatalog.StackDockWidth = 80; var narrowDock = new StackDockWindow(host); narrowDock.Refresh();

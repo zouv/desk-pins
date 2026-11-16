@@ -247,9 +247,9 @@ namespace DeskPins.App
         public void BringForward() { if (!IsVisible) Show(); Topmost = host.Library.Catalog.StackDockTopmost; Native.RaiseNoActivate(this); }
         private void UpdateHeaderChrome()
         {
-            var brush = Ui.Brush(IsActive ? "#476F94" : "#6B6B6B");
+            var brush = Ui.Brush(IsActive ? UiTheme.TitleActiveColor : UiTheme.TitleInactiveColor);
             header.Background = brush;
-            pinIndicator.Background = host.Library.Catalog.StackDockTopmost ? Ui.Brush("#9CC3E5") : brush;
+            pinIndicator.Background = host.Library.Catalog.StackDockTopmost ? Ui.Brush(UiTheme.PinColor) : brush;
         }
         private void FitHeight() { Height = HeaderHeight + host.Library.Catalog.Stacks.Count * RowHeight + 6; }
         private void Toggle(NoteStack stack) { stack.Expanded = !stack.Expanded; host.Library.SaveCatalog(); }

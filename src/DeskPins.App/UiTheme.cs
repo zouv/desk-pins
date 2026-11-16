@@ -9,6 +9,7 @@ namespace DeskPins.App
 {
     public static class UiTheme
     {
+        public const string TitleActiveColor = "#4A4A4A", TitleInactiveColor = "#6B6B6B", PinColor = "#9CC3E5", PinHoverColor = "#C9DDF0";
         public static Brush Accent => SystemParameters.HighContrast ? SystemColors.HighlightBrush : Ui.Brush("#1268B3");
         public static Brush Surface => SystemParameters.HighContrast ? SystemColors.WindowBrush : Brushes.White;
         public static Brush Background => SystemParameters.HighContrast ? SystemColors.WindowBrush : Ui.Brush("#F5F7FA");
