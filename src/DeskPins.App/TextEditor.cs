@@ -18,11 +18,14 @@ namespace DeskPins.App
     {
         private static readonly DependencyProperty[] formatProperties = { TextElement.FontFamilyProperty, TextElement.FontSizeProperty, TextElement.FontWeightProperty, TextElement.FontStyleProperty, TextElement.ForegroundProperty, Inline.TextDecorationsProperty };
         private static object[] copiedFormat;
+        private bool normalizing;
+        private bool loading;
+        private Window hostWindow;
         public bool LinksClickable = true;
         public bool CheckboxTrailingSpace = true;
         public bool MarkdownAutoFormat = true;
-        public string PlainText { get { return new TextRange(Document.ContentStart, Document.ContentEnd).Text.TrimEnd('\r', '\n'); } }
-        public string SelectedPlainText { get { return Selection.IsEmpty ? PlainText : Selection.Text; } }
+        public string PlainText { get { return new TextRange(Document.ContentStart, Document.ContentEnd).Text.TrimEnd('\r', '\n').Replace("​", ""); } }
+        public string SelectedPlainText { get { return Selection.IsEmpty ? PlainText : Selection.Text.Replace("​", ""); } }
         public void CopyFormat() { copiedFormat = formatProperties.Select(p => Selection.GetPropertyValue(p)).ToArray(); }
         public void PasteFormat() { if (IsReadOnly || copiedFormat == null) return; for (int i = 0; i < formatProperties.Length; i++) if (copiedFormat[i] != DependencyProperty.UnsetValue) Selection.ApplyPropertyValue(formatProperties[i], copiedFormat[i]); }
         public void Quote() { if (IsReadOnly) return; var range = new TextRange(Document.ContentStart, Document.ContentEnd); range.Text = string.Join("\n", range.Text.TrimEnd('\r', '\n').Replace("\r\n", "\n").Split('\n').Select(line => "> " + line)) + "\n\n"; CaretPosition = Document.ContentEnd; }
@@ -35,15 +38,43 @@ namespace DeskPins.App
             ApplyParagraphStyle(Document);
             AddHandler(Hyperlink.RequestNavigateEvent, new System.Windows.Navigation.RequestNavigateEventHandler((s, e) => { if (LinksClickable) OpenLink(e.Uri); e.Handled = true; }));
             PreviewMouseDoubleClick += DoubleClick;
+            PreviewMouseLeftButtonDown += (s, e) => { if (e.ChangedButton == MouseButton.Left && ToggleCheckboxAt(e.GetPosition(this))) e.Handled = true; };
+            PreviewMouseMove += (s, e) => { if (e.LeftButton == MouseButtonState.Pressed) return; if (!IsReadOnly && CheckboxAt(e.GetPosition(this)) != null) Cursor = Cursors.Hand; else ClearValue(CursorProperty); };
             TextChanged += (s, e) => NormalizeParagraphMargins();
             DataObject.AddPastingHandler(this, MarkdownPaste);
             PreviewKeyDown += MarkdownKeyDown;
+            Loaded += (s, e) => AttachWindowKeys();
+            Unloaded += (s, e) => DetachWindowKeys();
         }
         private void MarkdownKeyDown(object sender, KeyEventArgs e)
         {
+            if (e.Key == Key.Tab && (Keyboard.Modifiers == ModifierKeys.None || Keyboard.Modifiers == ModifierKeys.Shift))
+            {
+                if (MarkdownEditing.ChangeListIndent(this, Keyboard.Modifiers == ModifierKeys.Shift)) e.Handled = true;
+                return;
+            }
             if (!MarkdownAutoFormat || IsReadOnly || e.Key == Key.ImeProcessed) return;
             if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.None) { if (MarkdownEditing.TryAutoFormat(this)) e.Handled = true; }
             else if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.None) { if (MarkdownEditing.Enter(this)) e.Handled = true; }
+        }
+        private void AttachWindowKeys()
+        {
+            var window = Window.GetWindow(this);
+            if (window == null || ReferenceEquals(window, hostWindow)) return;
+            DetachWindowKeys();
+            hostWindow = window; hostWindow.PreviewKeyDown += WindowPreviewKeyDown;
+        }
+        private void DetachWindowKeys()
+        {
+            if (hostWindow == null) return;
+            hostWindow.PreviewKeyDown -= WindowPreviewKeyDown; hostWindow = null;
+        }
+        // Tab 在部分 WPF 输入路径会在 RichTextBox 类处理阶段被键盘导航吞掉；在窗口隧道阶段先处理列表缩进。
+        private void WindowPreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (!IsKeyboardFocusWithin || e.Key != Key.Tab || (Keyboard.Modifiers != ModifierKeys.None && Keyboard.Modifiers != ModifierKeys.Shift)) return;
+            try { if (MarkdownEditing.ChangeListIndent(this, Keyboard.Modifiers == ModifierKeys.Shift)) e.Handled = true; }
+            catch (Exception) { }
         }
         private void MarkdownPaste(object sender, DataObjectPastingEventArgs e) { if (MarkdownAutoFormat && !IsReadOnly && MarkdownEditing.TryPaste(this, e)) e.CancelCommand(); }
         private static void ApplyParagraphStyle(FlowDocument document)
@@ -54,22 +85,54 @@ namespace DeskPins.App
         }
         private void NormalizeParagraphMargins()
         {
-            foreach (var block in Document.Blocks) NormalizeBlock(block);
+            if (normalizing || loading) return;
+            normalizing = true;
+            try
+            {
+                double baseSize = Document.FontSize > 0 ? Document.FontSize : 12;
+                foreach (var block in Document.Blocks.ToArray()) NormalizeBlock(block, baseSize);
+            }
+            finally { normalizing = false; }
         }
-        private static void NormalizeBlock(Block block)
+        private static void NormalizeBlock(Block block, double baseSize)
         {
             var paragraph = block as Paragraph;
-            if (paragraph != null) { if (paragraph.Margin != new Thickness(0)) paragraph.Margin = new Thickness(0); return; }
+            if (paragraph != null)
+            {
+                MarkdownRenderer.NormalizeCheckboxes(paragraph.Inlines);
+                string marker;
+                if (MarkdownList.TryMarker(paragraph, out marker))
+                {
+                    if (paragraph.BorderThickness.Left > 0 || paragraph.FontStyle == FontStyles.Italic) { paragraph.TextIndent = 0; return; }
+                    MarkdownList.Apply(paragraph, MarkdownList.LevelFromPrefix(paragraph), marker, baseSize);
+                    return;
+                }
+                if (paragraph.Margin != new Thickness(0)) paragraph.Margin = new Thickness(0);
+                return;
+            }
             var list = block as List;
-            if (list != null) foreach (ListItem item in list.ListItems) foreach (var child in item.Blocks) NormalizeBlock(child);
+            if (list != null)
+            {
+                MarkdownRenderer.ApplyListLayout(list, baseSize);
+                foreach (ListItem item in list.ListItems.ToArray()) foreach (var child in item.Blocks.ToArray()) NormalizeBlock(child, baseSize);
+            }
         }
         public void Read(Note n)
         {
-            Document = new FlowDocument { PagePadding = new Thickness(0), FontFamily = new FontFamily(n.FontName), FontSize = IntegerSize(n.FontSize) };
-            ApplyParagraphStyle(Document);
-            var range = new TextRange(Document.ContentStart, Document.ContentEnd);
-            if (n.Body != null && n.Body.Length > 0) { using (var s = new MemoryStream(n.Body)) { try { range.Load(s, DataFormats.Rtf); } catch (ArgumentException) { range.Text = n.PlainText ?? Encoding.UTF8.GetString(n.Body); } } }
-            else range.Text = n.PlainText ?? "";
+            loading = true;
+            try
+            {
+                Document = new FlowDocument { PagePadding = new Thickness(0), FontFamily = new FontFamily(n.FontName), FontSize = IntegerSize(n.FontSize) };
+                ApplyParagraphStyle(Document);
+                var range = new TextRange(Document.ContentStart, Document.ContentEnd);
+                if (n.Body != null && n.Body.Length > 0) { using (var s = new MemoryStream(n.Body)) { try { range.Load(s, DataFormats.Rtf); } catch (ArgumentException) { range.Text = n.PlainText ?? Encoding.UTF8.GetString(n.Body); } } }
+                else range.Text = n.PlainText ?? "";
+            }
+            finally { loading = false; }
+            NormalizeParagraphMargins();
+            loading = true;
+            try { MarkdownRenderer.ConvertLists(Document, Document.FontSize > 0 ? Document.FontSize : 12); }
+            finally { loading = false; }
             NormalizeParagraphMargins();
             NormalizeIntegerSizes();
             Foreground = Ui.Brush(n.Foreground); IsReadOnly = n.Locked;
@@ -78,7 +141,14 @@ namespace DeskPins.App
         {
             var range = new TextRange(Document.ContentStart, Document.ContentEnd);
             using (var s = new MemoryStream()) { range.Save(s, DataFormats.Rtf); n.Body = s.ToArray(); }
-            n.PlainText = range.Text.TrimEnd('\r', '\n');
+            n.PlainText = range.Text.TrimEnd('\r', '\n').Replace("​", "");
+        }
+        public void ConvertLegacyLists()
+        {
+            loading = true;
+            try { MarkdownRenderer.ConvertLists(Document, Document.FontSize > 0 ? Document.FontSize : 12); }
+            finally { loading = false; }
+            NormalizeParagraphMargins();
         }
         public void InsertText(string text) { if (IsReadOnly) return; Selection.Text = text; CaretPosition = Selection.End; }
         public void InsertImage(BitmapSource image)
@@ -102,8 +172,8 @@ namespace DeskPins.App
                 case "italic": EditingCommands.ToggleItalic.Execute(null, this); break;
                 case "underline": EditingCommands.ToggleUnderline.Execute(null, this); break;
                 case "strike": var current = Selection.GetPropertyValue(Inline.TextDecorationsProperty); Selection.ApplyPropertyValue(Inline.TextDecorationsProperty, current is TextDecorationCollection && ((TextDecorationCollection)current).Contains(TextDecorations.Strikethrough[0]) ? null : TextDecorations.Strikethrough); break;
-                case "bullets": EditingCommands.ToggleBullets.Execute(null, this); break;
-                case "numbers": EditingCommands.ToggleNumbering.Execute(null, this); break;
+                case "bullets": MarkdownEditing.ApplyBulletList(this, false); break;
+                case "numbers": MarkdownEditing.ApplyBulletList(this, true); break;
                 case "left": EditingCommands.AlignLeft.Execute(null, this); break;
                 case "center": EditingCommands.AlignCenter.Execute(null, this); break;
                 case "right": EditingCommands.AlignRight.Execute(null, this); break;
@@ -235,9 +305,35 @@ namespace DeskPins.App
         {
             var p = GetPositionFromPoint(e.GetPosition(this), true); if (p == null) return;
             var next = p.GetPositionAtOffset(1, LogicalDirection.Forward); if (next == null) return; var r = new TextRange(p, next);
-            if (!IsReadOnly && (r.Text == "☐" || r.Text == "☑")) { r.Text = r.Text == "☐" ? "☑" : "☐"; e.Handled = true; return; }
             if (!LinksClickable) return;
             var run = p.Parent as Run; if (run != null) { var match = Regex.Match(run.Text, @"(?:https?://|mailto:|file:///)[^\s<>]+", RegexOptions.IgnoreCase); if (match.Success) { Uri uri; if (Uri.TryCreate(match.Value, UriKind.Absolute, out uri)) { OpenLink(uri); e.Handled = true; } } }
+        }
+        private TextRange CheckboxAt(Point point)
+        {
+            var position = GetPositionFromPoint(point, true);
+            if (position == null) return null;
+            foreach (var offset in new[] { 0, -1, 1, -2, 2 })
+            {
+                var candidate = offset == 0 ? position : position.GetPositionAtOffset(offset);
+                if (candidate == null) continue;
+                var next = candidate.GetPositionAtOffset(1, LogicalDirection.Forward);
+                if (next == null) continue;
+                var rect = candidate.GetCharacterRect(LogicalDirection.Forward);
+                if (rect.IsEmpty || point.X < rect.Left - 8 || point.X > rect.Right + 12 || point.Y < rect.Top - 6 || point.Y > rect.Bottom + 6) continue;
+                var range = new TextRange(candidate, next);
+                if (range.Text == "☐" || range.Text == "☑") return range;
+            }
+            return null;
+        }
+        public bool ToggleCheckboxAt(Point point)
+        {
+            if (IsReadOnly) return false;
+            var range = CheckboxAt(point);
+            if (range == null) return false;
+            range.Text = range.Text == "☐" ? "☑" : "☐";
+            CaretPosition = range.End;
+            Focus();
+            return true;
         }
         public static void OpenLink(Uri uri) { if (uri == null || !(new[] { "http", "https", "mailto", "file" }).Contains(uri.Scheme)) return; try { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); } catch (Exception ex) { Ui.Error(ex); } }
     }

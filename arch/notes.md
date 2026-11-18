@@ -15,7 +15,7 @@
 | 标题栏聚焦色 / Pin 色块 | NoteWindow 构造（indicator 事件）、ApplyAppearance / UpdatePinIndicator |
 | 拖拽吸附 | AppHost.SnapAfterDrag、NoteWindow.DragTitle / MoveSelected |
 | 便签层级 / 聚焦顺序 | NoteWindow 构造（Activated）、AppHost.NoteActivated / ShowAllNotes / RaiseInFocusOrder / BringForward、Native.RaiseNoActivate |
-| Markdown 编辑 / 粘贴 / 导出 | NoteWindow.TextMenu 的 Markdown 子菜单、MarkdownEditing.TryAutoFormat / CommitInline / Enter / ApplyHeading / ToggleQuote / ApplyTaskList / ApplyInlineCode / ApplyCodeBlock / ConvertSelection / PasteMarkdown / CopyMarkdown、MarkdownRenderer.ToFlowDocument / RenderBlocks / RenderInlines / HeadingLevel、MarkdownExporter.ToMarkdown、TextEditor.MarkdownAutoFormat |
+| Markdown 编辑 / 粘贴 / 导出 | NoteWindow.TextMenu 的 Markdown 子菜单、MarkdownEditing.TryAutoFormat / CommitInline / Enter / ApplyHeading / ToggleQuote / ApplyBulletList / ApplyTaskList / ApplyInlineCode / ApplyCodeBlock / ConvertSelection / PasteMarkdown / CopyMarkdown、MarkdownList.TryMarker / Apply / NextMarker / ReplaceMarker、MarkdownRenderer.ToFlowDocument / RenderBlocks / RenderInlines / ConvertLists、MarkdownExporter.ToMarkdown、TextEditor.MarkdownAutoFormat |
 
 ## 3. 重点链路
 
@@ -32,7 +32,9 @@
 - 公共弹框：Ui.DialogContent 提供滚动正文与固定按钮页脚，FitDialog 限工作区并为非任务栏窗口补活动 Owner；PrimaryButton / DangerButton 区分主要 / 危险动作，确认默认 No。输入框在 Loaded 后 Dispatcher 聚焦 / 全选；集合、联系人、提醒、附着验证失败定位字段，危险动作独立并明确后果。ScheduleWindow 仅对已有休眠 / 重复或闹钟显示“现有提醒”清除区。
 - 菜单按需生成：Ui.Item 接收 check / enabled；NoteWindow.Menu 首层保留常用操作，将整理、显示行为、导出传输分别收进二级菜单并保留快捷键，仍标明关闭可恢复、永久删除及传输后关闭；Alt+F4 只关闭当前便签（进入 Closed），不退出应用。TextMenu 按选区动态显示所选文字 / 全文格式，段落、插入和高亮分组，按锁定、选择、剪贴板状态启停；ImageMenu 按锁定、选择、剪贴板和 CanUndo / CanRedo 启停。BuildTray 分新建、显隐 / 管理、工具与退出组；数据维护只在设置页。
 - 便签属性由 NotePropertiesWindow 统一提供：NoteWindow.Menu 的“属性…”与管理器预览 / 右键入口都调用它，只读展示标题、状态、类型、时间、文件夹、堆叠、标签、加密 / 锁定、本地自增序号与完整 GUID 标识符；不要再在各自窗口重复拼一套属性弹框。
-- Markdown 输入分三层：行首 `#` / `-` / `1.` / `>` / `- [ ]` 在空格时由 MarkdownEditing.TryAutoFormat 转换（清除标记、应用段落字号 / 粗体、列表或引用样式）；回车时 CommitInline 用 Markdig 解析当前段，把 `**` / `*` / `~~` / 反引号 / 链接重建为 Run / Span / Hyperlink（仅在段落没有手工格式时），标题段之后再由 Enter 新建普通段落；纯文本粘贴由 TryPaste 检测并整体渲染。正文右键 TextMenu 的 Markdown 子菜单对当前段 / 选区执行标题、粗体 / 斜体 / 删除线、行内代码、链接、列表、引用、任务列表、代码块、水平线、应用 Markdown、粘贴 / 复制 Markdown。RTF 仍是 Note.Body 的存储格式，Markdown 只是输入 / 导出层。
+- Markdown 列表不使用 WPF List，而是带行首标记的普通段落（MarkdownList）：`•` / `1.` / `☐` / `☑` + 空格，`Padding.Left` 与负 `TextIndent` 形成悬挂缩进，标记与正文左缘对齐，上下 Margin 固定 1px，嵌套层级用零宽空格前缀写入 RTF（PlainText / 导出时剔除）。回车在非空列表项后新建同类型项（编号递增、任务默认 ☐），空列表项回车退出；Tab / Shift+Tab 按约四个空格调整层级，Enter 保持当前层级，Tab 在 TextEditor 所属窗口的 PreviewKeyDown 中处理（RichTextBox 类处理可能吞掉 Tab），旧 WPF 列表按 Tab 时自动迁移；旧便签的 WPF List 在 TextEditor.Read 中由 MarkdownRenderer.ConvertLists 迁移。任务勾选框统一使用 Segoe UI Symbol 字体的 `☐` / `☑`，由 TextEditor 的 PreviewMouseMove / PreviewMouseLeftButtonDown 提供手型光标与单击切换，命中区向右侧扩展。
+- Markdown 自动识别在空格触发：`[ ]` / `[]` / `[x]`（含全角括号与全角空格、行首少量空格）任务、`|` / `>` 引用、`` `内容` `` 行内代码、成对围栏代码块、列表 / 标题。段落回车：引用与代码块直接退出到正文段落（Shift+Enter 在块内换行）；标题段后新建普通段落；任务 / 列表按上述规则续项。
+- 手写空格缩进的列表（`    •` / `    1.` / `    ☐` / `    -` / `    [ ]`）由 TryRawList 处理：回车按相同前导空格续写下一项（编号递增、任务默认 ☐），空项回车退出；Tab / Shift+Tab 直接增删四个前导空格，不用 MarkdownList 的层级前缀。正文 / 引用 / 代码块内 Tab 也插入四个空格，Shift+Tab 删除最多四个前导空格。
 - TextEditor 必须开启 IsInactiveSelectionHighlightEnabled：右键菜单 / 其他窗口获得焦点时，选中文字仍要显示选区高亮；右键点击选区内由 PreviewMouseRightButtonDown 拦截默认折叠，不能再依赖焦点保持。
 - 标题字号 = 文档基础字号 × 级别系数（MarkdownRenderer.HeadingSize）；导出只识别 H1–H5，H6 与正文粗体同字号，按粗体段落导出。`.md` 导出走 AppHost.ExportTo，用 TextEditor.Read 后 MarkdownExporter.ToMarkdown，不把导出结果反写回 Note.Body。
 
@@ -60,3 +62,8 @@
 - NormalizeParagraphMargins 仍会把段落 Margin 归零；标题 / 引用不要依赖 Margin 做间距（引用用 Padding / Border，标题用字号 / 粗体）。标题字号由基础字号推导，导出必须传入与创建时一致的基础字号，否则 H1–H5 识别会错位；新增 Markdown 语法要同时补 RTF 往返测试。
 - Markdown 解析使用 Markdig（BSD-2-Clause，用户批准的第三方依赖），只取 AST，WPF 渲染自写；不要引入 Markdig.Wpf / HTML 渲染器。构建需要 NuGet 还原，发布包必须带上 Markdig.dll 与 System.Buffers / System.Memory / System.Numerics.Vectors / System.Runtime.CompilerServices.Unsafe，`scripts/build.ps1`、`scripts/package.ps1` 的复制清单要保持同步。
 - 右键菜单弹出会夺走键盘焦点，WPF 默认隐藏非活动选区；TextEditor 必须保持 IsInactiveSelectionHighlightEnabled=true，并继续在 PreviewMouseRightButtonDown 中拦截选区内右键的默认折叠，否则会出现“选中文字后右键，选区渲染消失”。
+- 不要给 WPF List 设置 `List.Padding = 0`：在已加载窗口中会把列表标记挤出布局并让正文贴左（离屏测量看不出来）；Markdown 列表已改用普通段落，WPF List 只保留给旧数据迁移。
+- `TextEditor.NormalizeParagraphMargins` 会在 TextChanged 中改格式，必须用 `normalizing` / `loading` 防止递归和 RTF 加载中途枚举到半成品 List；`MarkdownList` 的层级用零宽空格前缀写入 RTF，读写、PlainText、导出必须一致剔除，否则搜索或复制会出现隐藏字符。
+- 引用应用到列表段落时必须把 `TextIndent` 归零，且 TextEditor.NormalizeBlock 检测到引用样式（左边框 / 斜体）时不能再按 MarkdownList 重套负缩进，否则首行会从面板左侧被裁掉；这是 Quote 排版偶发错乱的根因。
+- 行内代码转换后必须单独插入一个使用正文字体 / 字号的空格 Run，否则后续输入会继承 Consolas / 代码底色；任务勾选框 Run 要与后面的文字分开，NormalizeCheckboxes 会把 “☐ 正文” 拆成符号字体勾选框 + 正文字体内容，不能再把整个 Run 改成符号字体。
+- WPF RichTextBox 的 Tab 可能被键盘导航 / 类处理吞掉，只在编辑器 PreviewKeyDown 处理会表现为“按 Tab 没反应”；TextEditor 必须在 Loaded 时挂到所属 Window 的 PreviewKeyDown，并在 Unloaded 时解挂。旧 WPF List 的 IncreaseIndentation 只改段落缩进、不改列表层级，Tab 时先调用 ConvertLegacyLists 再按 MarkdownList 处理。

@@ -22,7 +22,7 @@ WPF 便签 / 管理 / 设置
 | 任务 | 首读 | 入口小节 | 可忽略 |
 |---|---|---|---|
 | 便签编辑和窗口行为 | NoteWindow.cs、AppHost.cs、TextEditor.cs、TextFormatWindow.cs、ImageEditor.cs、Native.cs、WindowResize.cs | arch/notes.md | 通信与迁移 |
-| Markdown 输入 / 粘贴 / 导出 | TextEditor.cs、NoteWindow.cs（TextMenu）、MarkdownEditing.cs、MarkdownRenderer.cs、MarkdownExporter.cs | arch/notes.md | 通信与迁移 |
+| Markdown 输入 / 粘贴 / 导出 | TextEditor.cs、NoteWindow.cs（TextMenu）、MarkdownEditing.cs、MarkdownRenderer.cs、MarkdownList.cs、MarkdownExporter.cs | arch/notes.md | 通信与迁移 |
 | 公共 UI、弹框与菜单 | UiTheme.cs、Ui.cs、TextFormatWindow.cs、NotePropertiesWindow.cs、CollectionEditor.cs、CollectionsWindow.cs、ScheduleWindow.cs、AboutWindow.cs；菜单见 NoteWindow.Menu / TextMenu / ImageMenu、AppHost.BuildTray | arch/notes.md | 图片算法与通信协议 |
 | 屏幕截取 / 从屏幕新建图片便签 | CaptureWindow.cs、AppHost.Capture | arch/notes.md | 通信与迁移 |
 | 管理、收藏、标签和堆叠 | ManagerWindow.cs、ManagerWindow.Collections.cs、ManagerWindow.Calendar.cs、ManagerWindow.Search.cs、CollectionEditor.cs、CollectionsWindow.cs(StackDockWindow)、NoteLibrary.cs | arch/manager.md | 通信协议 |
@@ -62,7 +62,8 @@ WPF 便签 / 管理 / 设置
 | src/DeskPins.App/CaptureWindow.cs | 全屏截取与框选，返回 BitmapSource 供 AppHost.Capture 创建图片便签 |
 | src/DeskPins.App/AboutWindow.cs | 关于窗口：产品名、版本 / 作者、功能简介与关闭按钮 |
 | src/DeskPins.App/NotePropertiesWindow.cs | 便签属性窗口（桌面便签右键与管理器共用）：元数据、本地序号与完整 GUID 标识符 |
-| src/DeskPins.App/MarkdownRenderer.cs | Markdig 解析结果 → WPF FlowDocument：标题 / 列表 / 引用 / 代码块 / 行内强调 / 链接；Markdown 粘贴与导入共用 |
+| src/DeskPins.App/MarkdownRenderer.cs | Markdig 解析结果 → WPF FlowDocument：标题 / 列表 / 引用 / 代码块 / 行内强调 / 链接；Markdown 粘贴与导入共用；旧 WPF List 读取时迁移 |
+| src/DeskPins.App/MarkdownList.cs | Markdown 列表段落：行首标记、悬挂缩进、层级前缀与下一标记计算；不依赖 WPF List |
 | src/DeskPins.App/MarkdownEditing.cs | 行首标记自动格式化、回车行内提交、纯文本粘贴转换与插入；由 TextEditor 的键盘 / 粘贴事件调用 |
 | src/DeskPins.App/MarkdownExporter.cs | FlowDocument → Markdown（标题 / 列表 / 强调 / 链接 / 代码块，允许有损）；`.md` 导出使用 |
 | src/DeskPins.App/CollectionsWindow.cs | 联系人完整草稿表单、收藏文件夹 / 标签批量管理；同文件 StackDockWindow 为统一竖排堆叠面板（便签式外观，单击行展开，极简模式隐藏名称） |

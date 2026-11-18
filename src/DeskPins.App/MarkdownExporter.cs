@@ -46,6 +46,17 @@ namespace DeskPins.App
                 builder.AppendLine();
                 return;
             }
+            string marker;
+            if (MarkdownList.TryMarker(paragraph, out marker))
+            {
+                int level = MarkdownList.Level(paragraph, marker, baseSize);
+                string listText = ParagraphText(paragraph, baseSize, false);
+                int cut = Math.Min(marker.Length, listText.Length);
+                if (cut < listText.Length && listText[cut] == ' ') cut++;
+                builder.Append(new string(' ', level * 2)).Append(MarkdownList.DisplayMarker(marker)).AppendLine(listText.Substring(cut).TrimStart());
+                builder.AppendLine();
+                return;
+            }
             int heading = MarkdownRenderer.HeadingLevel(paragraph, baseSize);
             string text = ParagraphText(paragraph, baseSize, heading > 0);
             if (IsThematicBreak(text)) { builder.AppendLine("---"); builder.AppendLine(); return; }
@@ -91,7 +102,7 @@ namespace DeskPins.App
         {
             var builder = new StringBuilder();
             WriteInlines(paragraph.Inlines, builder, false, false, false, skipBoldMarkers);
-            return builder.ToString().TrimEnd();
+            return builder.ToString().TrimEnd().Replace("​", "");
         }
 
         private static void WriteInlines(InlineCollection inlines, StringBuilder builder, bool bold, bool italic, bool strike, bool skipBoldMarkers)
