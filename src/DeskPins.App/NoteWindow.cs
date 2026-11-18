@@ -76,7 +76,7 @@ namespace DeskPins.App
             fontSizeTipTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) }; fontSizeTipTimer.Tick += (s, e) => { fontSizeTipTimer.Stop(); fontSizeTip.Visibility = Visibility.Collapsed; };
             CreateEditor();
             SourceInitialized += (s, e) => { Native.ToolWindow(this); Native.SetGhost(this, Note.Ghost); };
-            Activated += (s, e) => { ApplyAppearance(); if (Host.Library.Catalog.Settings.ClickMakesVisible) Host.ShowAllNotes(); Host.BringStacksForward(); }; Deactivated += (s, e) => { Flush(); ApplyAppearance(); };
+            Activated += (s, e) => { ApplyAppearance(); Host.NoteActivated(this); Host.BringStacksForward(); }; Deactivated += (s, e) => { Flush(); ApplyAppearance(); };
             LocationChanged += Location; SizeChanged += (s, e) => { if (internalChange || Note.Rolled) return; Note.Width = Width; Note.Height = Height; Note.ExpandedHeight = Height; QueueSave(); };
             PreviewKeyDown += HandleKeyDown; PreviewKeyUp += HandleKeyUp;
             PreviewMouseLeftButtonDown += (s, e) => { if (alarming) StopAlarm(false); };
@@ -100,7 +100,7 @@ namespace DeskPins.App
             internalChange = true; content.Children.Clear(); Host.Library.Load(Note);
             if (Note.Kind == NoteKind.Text)
             {
-                TextEditor = new TextEditor(); ImageEditor = null; TextEditor.Read(Note); TextEditor.LinksClickable = Host.Library.Catalog.Settings.LinksClickable; TextEditor.CheckboxTrailingSpace = Host.Library.Catalog.Settings.CheckboxTrailingSpace; TextEditor.TextChanged += (s, e) => { if (!internalChange) { QueueSave(); Dispatcher.BeginInvoke(new Action(AutoSize), DispatcherPriority.Background); } };
+                TextEditor = new TextEditor(); ImageEditor = null; TextEditor.Read(Note); TextEditor.LinksClickable = Host.Library.Catalog.Settings.LinksClickable; TextEditor.CheckboxTrailingSpace = Host.Library.Catalog.Settings.CheckboxTrailingSpace; TextEditor.MarkdownAutoFormat = Host.Library.Catalog.Settings.MarkdownAutoFormat; TextEditor.TextChanged += (s, e) => { if (!internalChange) { QueueSave(); Dispatcher.BeginInvoke(new Action(AutoSize), DispatcherPriority.Background); } };
                 TextEditor.PreviewMouseRightButtonDown += (s, e) => { if (TextEditor.Selection.IsEmpty) return; var position = TextEditor.GetPositionFromPoint(e.GetPosition(TextEditor), true); if (position != null && TextEditor.Selection.Start.CompareTo(position) <= 0 && TextEditor.Selection.End.CompareTo(position) >= 0) e.Handled = true; };
                 TextEditor.PreviewMouseRightButtonUp += (s, e) => { if (alarming) { StopAlarm(true); e.Handled = true; return; } var menu = TextMenu(); menu.PlacementTarget = TextEditor; menu.IsOpen = true; e.Handled = true; }; TextEditor.PreviewMouseLeftButtonDown += (s, e) => { Host.Select(null, false); };
                 content.Children.Add(TextEditor);
@@ -151,7 +151,7 @@ namespace DeskPins.App
             frame.Effect = Ui.NoteShadow(Host.Library.Catalog.Settings.ShowShadow);
             caption.Text = (Note.Attachment != null ? "📎 " : "") + (Note.AlarmUtc.HasValue ? "◷ " : "") + Note.DisplayTitle; caption.ToolTip = Ui.Text("创建：") + Note.CreatedUtc.ToLocalTime() + "\n" + Ui.Text("修改：") + Note.ModifiedUtc.ToLocalTime() + (Note.AlarmUtc.HasValue ? "\n" + Ui.Text("闹钟：") + Note.AlarmUtc.Value.ToLocalTime() : "");
             closeButton.ToolTip = Ui.Text("关闭便签（可恢复）");
-            if (TextEditor != null) { TextEditor.IsReadOnly = Note.Locked; TextEditor.Background = Ui.Brush(Note.Color); TextEditor.VerticalScrollBarVisibility = Note.Scrollbar ? ScrollBarVisibility.Auto : ScrollBarVisibility.Hidden; TextEditor.LinksClickable = Host.Library.Catalog.Settings.LinksClickable; TextEditor.CheckboxTrailingSpace = Host.Library.Catalog.Settings.CheckboxTrailingSpace; }
+            if (TextEditor != null) { TextEditor.IsReadOnly = Note.Locked; TextEditor.Background = Ui.Brush(Note.Color); TextEditor.VerticalScrollBarVisibility = Note.Scrollbar ? ScrollBarVisibility.Auto : ScrollBarVisibility.Hidden; TextEditor.LinksClickable = Host.Library.Catalog.Settings.LinksClickable; TextEditor.CheckboxTrailingSpace = Host.Library.Catalog.Settings.CheckboxTrailingSpace; TextEditor.MarkdownAutoFormat = Host.Library.Catalog.Settings.MarkdownAutoFormat; }
             if (ImageEditor != null) { ImageEditor.Locked = Note.Locked; ImageEditor.BackgroundColor = ((SolidColorBrush)Ui.Brush(Note.Color)).Color; ImageEditor.MaxUndo = Host.Library.Catalog.Settings.ImageUndoLevels; ImageEditor.SaveFormat = Host.Library.Catalog.Settings.ImageSaveType; }
             ApplyOpacity();
             content.Opacity = Note.Secret && !IsActive ? 0 : 1; frame.BorderBrush = Host.Selected.Contains(Note.Id) ? Brushes.DodgerBlue : Brushes.DimGray; Native.SetGhost(this, Note.Ghost);
@@ -351,6 +351,7 @@ namespace DeskPins.App
             var m = new ContextMenu();
             m.Items.Add(Ui.Item("设置标题…", () => Run("title"), Host.ShortcutFor("title")));
             m.Items.Add(Ui.Item("设置颜色…", () => Host.SetColor(Note)));
+            m.Items.Add(Ui.Item("属性…", () => NotePropertiesWindow.Show(Host, Note, this)));
             var styles = Ui.Sub("设为样式");
             for (int i = 0; i < 10; i++) { int ix = i; styles.Items.Add(Ui.Item(Host.Library.Catalog.Settings.Styles[i].Name, () => ApplyStyle(ix), "Alt+" + i)); }
             m.Items.Add(styles);
@@ -430,6 +431,35 @@ namespace DeskPins.App
             m.Items.Add(Ui.Item("粘贴为纯文本", () => Run("paste-plain"), Host.ShortcutFor("paste-plain"), enabled: !Note.Locked && Clipboard.ContainsText()));
             m.Items.Add(new Separator());
             m.Items.Add(Ui.Item(TextEditor.Selection.IsEmpty ? "设置全文格式…" : "设置所选文字格式…", () => TextEditor.FontDialog(), enabled: !Note.Locked));
+            var markdown = Ui.Sub("Markdown");
+            var markdownParagraph = TextEditor.CaretPosition == null ? null : TextEditor.CaretPosition.Paragraph;
+            int heading = markdownParagraph == null ? 0 : MarkdownRenderer.HeadingLevel(markdownParagraph, TextEditor.Document.FontSize);
+            bool quoted = markdownParagraph != null && markdownParagraph.BorderThickness.Left > 0;
+            bool hasSelection = !TextEditor.Selection.IsEmpty;
+            for (int level = 1; level <= 6; level++)
+            {
+                int value = level;
+                markdown.Items.Add(Ui.Item(Ui.Text("标题") + " " + level, () => MarkdownEditing.ApplyHeading(TextEditor, value), check: heading == value, enabled: !Note.Locked));
+            }
+            markdown.Items.Add(Ui.Item("正文", () => MarkdownEditing.ApplyHeading(TextEditor, 0), check: heading == 0, enabled: !Note.Locked));
+            markdown.Items.Add(new Separator());
+            markdown.Items.Add(Ui.Item("粗体", () => TextEditor.Format("bold"), Host.ShortcutFor("bold"), enabled: !Note.Locked));
+            markdown.Items.Add(Ui.Item("斜体", () => TextEditor.Format("italic"), Host.ShortcutFor("italic"), enabled: !Note.Locked));
+            markdown.Items.Add(Ui.Item("删除线", () => TextEditor.Format("strike"), Host.ShortcutFor("strike"), enabled: !Note.Locked));
+            markdown.Items.Add(Ui.Item("行内代码", () => MarkdownEditing.ApplyInlineCode(TextEditor), enabled: !Note.Locked && hasSelection));
+            markdown.Items.Add(Ui.Item("插入链接…", () => Run("link"), Host.ShortcutFor("link"), enabled: !Note.Locked));
+            markdown.Items.Add(new Separator());
+            markdown.Items.Add(Ui.Item("项目符号", () => Run("bullets"), enabled: !Note.Locked));
+            markdown.Items.Add(Ui.Item("编号", () => Run("numbers"), enabled: !Note.Locked));
+            markdown.Items.Add(Ui.Item("引用", () => MarkdownEditing.ToggleQuote(TextEditor), check: quoted, enabled: !Note.Locked));
+            markdown.Items.Add(Ui.Item("任务列表", () => MarkdownEditing.ApplyTaskList(TextEditor), enabled: !Note.Locked));
+            markdown.Items.Add(Ui.Item("代码块", () => MarkdownEditing.ApplyCodeBlock(TextEditor), enabled: !Note.Locked));
+            markdown.Items.Add(Ui.Item("插入水平线", () => MarkdownEditing.InsertHorizontalRule(TextEditor), enabled: !Note.Locked));
+            markdown.Items.Add(new Separator());
+            markdown.Items.Add(Ui.Item("应用 Markdown 到所选文字", () => MarkdownEditing.ConvertSelection(TextEditor), enabled: !Note.Locked && hasSelection));
+            markdown.Items.Add(Ui.Item("粘贴 Markdown", () => MarkdownEditing.PasteMarkdown(TextEditor), enabled: !Note.Locked && Clipboard.ContainsText()));
+            markdown.Items.Add(Ui.Item("复制为 Markdown", () => MarkdownEditing.CopyMarkdown(TextEditor)));
+            m.Items.Add(markdown);
             var paragraph = Ui.Sub("段落");
             foreach (var pair in new[] { new[] { "项目符号", "bullets" }, new[] { "编号", "numbers" }, new[] { "左对齐", "left" }, new[] { "居中", "center" }, new[] { "右对齐", "right" }, new[] { "从左到右", "ltr" }, new[] { "从右到左", "rtl" } }) { var action = pair[1]; paragraph.Items.Add(Ui.Item(pair[0], () => Run(action), enabled: !Note.Locked)); }
             m.Items.Add(paragraph);

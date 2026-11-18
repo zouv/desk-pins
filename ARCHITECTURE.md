@@ -21,8 +21,9 @@ WPF 便签 / 管理 / 设置
 
 | 任务 | 首读 | 入口小节 | 可忽略 |
 |---|---|---|---|
-| 便签编辑和窗口行为 | NoteWindow.cs、TextEditor.cs、TextFormatWindow.cs、ImageEditor.cs、Native.cs、WindowResize.cs | arch/notes.md | 通信与迁移 |
-| 公共 UI、弹框与菜单 | UiTheme.cs、Ui.cs、TextFormatWindow.cs、CollectionEditor.cs、CollectionsWindow.cs、ScheduleWindow.cs、AboutWindow.cs；菜单见 NoteWindow.Menu / TextMenu / ImageMenu、AppHost.BuildTray | arch/notes.md | 图片算法与通信协议 |
+| 便签编辑和窗口行为 | NoteWindow.cs、AppHost.cs、TextEditor.cs、TextFormatWindow.cs、ImageEditor.cs、Native.cs、WindowResize.cs | arch/notes.md | 通信与迁移 |
+| Markdown 输入 / 粘贴 / 导出 | TextEditor.cs、NoteWindow.cs（TextMenu）、MarkdownEditing.cs、MarkdownRenderer.cs、MarkdownExporter.cs | arch/notes.md | 通信与迁移 |
+| 公共 UI、弹框与菜单 | UiTheme.cs、Ui.cs、TextFormatWindow.cs、NotePropertiesWindow.cs、CollectionEditor.cs、CollectionsWindow.cs、ScheduleWindow.cs、AboutWindow.cs；菜单见 NoteWindow.Menu / TextMenu / ImageMenu、AppHost.BuildTray | arch/notes.md | 图片算法与通信协议 |
 | 屏幕截取 / 从屏幕新建图片便签 | CaptureWindow.cs、AppHost.Capture | arch/notes.md | 通信与迁移 |
 | 管理、收藏、标签和堆叠 | ManagerWindow.cs、ManagerWindow.Collections.cs、ManagerWindow.Calendar.cs、ManagerWindow.Search.cs、CollectionEditor.cs、CollectionsWindow.cs(StackDockWindow)、NoteLibrary.cs | arch/manager.md | 通信协议 |
 | 设置草稿、校验与分项应用 | SettingsWindow.cs、SettingsFieldState.cs、AppHost.ValidateSettings / ApplySettingsReport、Ui.cs、Localization.cs | arch/settings.md | 通信协议与迁移 |
@@ -45,7 +46,7 @@ WPF 便签 / 管理 / 设置
 | HANDOFF.md | 当前开发状态与下一步 |
 | CHANGELOG.md | 完成的用户可感知变化 |
 | README.md | 产品介绍与当前可运行状态 |
-| docs/ | 技术栈、使用说明、功能对照 |
+| docs/ | 技术栈、使用说明、功能对照、第三方依赖许可 |
 | .claude/ | 模板显式技能和文档检查 hook |
 | check-docs.sh | 模板机械体检 |
 | .vibe-template | 模板类型和版本来源 |
@@ -60,6 +61,10 @@ WPF 便签 / 管理 / 设置
 | src/DeskPins.App/CollectionEditor.cs | 文件夹 / 堆叠 / 标签属性对话框、搜索标签过滤对话框 |
 | src/DeskPins.App/CaptureWindow.cs | 全屏截取与框选，返回 BitmapSource 供 AppHost.Capture 创建图片便签 |
 | src/DeskPins.App/AboutWindow.cs | 关于窗口：产品名、版本 / 作者、功能简介与关闭按钮 |
+| src/DeskPins.App/NotePropertiesWindow.cs | 便签属性窗口（桌面便签右键与管理器共用）：元数据、本地序号与完整 GUID 标识符 |
+| src/DeskPins.App/MarkdownRenderer.cs | Markdig 解析结果 → WPF FlowDocument：标题 / 列表 / 引用 / 代码块 / 行内强调 / 链接；Markdown 粘贴与导入共用 |
+| src/DeskPins.App/MarkdownEditing.cs | 行首标记自动格式化、回车行内提交、纯文本粘贴转换与插入；由 TextEditor 的键盘 / 粘贴事件调用 |
+| src/DeskPins.App/MarkdownExporter.cs | FlowDocument → Markdown（标题 / 列表 / 强调 / 链接 / 代码块，允许有损）；`.md` 导出使用 |
 | src/DeskPins.App/CollectionsWindow.cs | 联系人完整草稿表单、收藏文件夹 / 标签批量管理；同文件 StackDockWindow 为统一竖排堆叠面板（便签式外观，单击行展开，极简模式隐藏名称） |
 | src/DeskPins.App/SettingsWindow.cs | 非模态九页设置、独立草稿、全字段校验定位、样式预览、快捷键分组搜索及即时数据维护 |
 | src/DeskPins.App/SettingsFieldState.cs | 跨页面 / 样式保留 Raw / Error 与定位信息；Check 仅把合法输入应用到草稿 |

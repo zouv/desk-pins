@@ -6,7 +6,9 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
+using System.Windows.Documents;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using DeskPins.Core;
 using DeskPins.App;
@@ -57,7 +59,7 @@ namespace DeskPins.Tests
             string file = Path.Combine(dir, "store.db"), backup = Path.Combine(dir, "backup.db"); string id;
             using (var lib = new NoteLibrary(file))
             {
-                var n = lib.Create(); id = n.Id; n.Title = "测试便签"; n.Body = Encoding.ASCII.GetBytes(@"{\rtf1 hello}"); n.PlainText = "Unicode 中文_100%"; lib.Save(n); Check(lib.Search("中文_100%").Count() == 1, "Unicode and escaped LIKE search"); Check(lib.Search("' OR 1=1 --").Count() == 0, "parameterized search"); Check(!lib.Search("StateUtc").Any(), "search excludes metadata property names"); Check(lib.Search(id.Substring(0, 8)).Any(x => x.Id == id), "search matches a note id prefix");
+                var n = lib.Create(); id = n.Id; Check(id.Length == 32 && id.All(Uri.IsHexDigit), "note id is a random 32-char GUID without dashes"); var numbered = lib.Create(); Check(n.Number == 1 && numbered.Number == 2, "note numbers start at 1 and increment"); Check(id != numbered.Id, "created notes receive distinct ids"); n.Title = "测试便签"; n.Body = Encoding.ASCII.GetBytes(@"{\rtf1 hello}"); n.PlainText = "Unicode 中文_100%"; lib.Save(n); Check(lib.Search("中文_100%").Count() == 1, "Unicode and escaped LIKE search"); Check(lib.Search("' OR 1=1 --").Count() == 0, "parameterized search"); Check(!lib.Search("StateUtc").Any(), "search excludes metadata property names"); Check(lib.Search(id.Substring(0, 8)).Any(x => x.Id == id), "search matches a note id prefix"); Check(lib.Search(numbered.Number.ToString()).Any(x => x.Id == numbered.Id), "search matches a note number");
                 lib.Move(n, NoteState.Closed); Check(lib.Notes[id].State == NoteState.Closed, "close is recoverable"); lib.Move(n, NoteState.Desktop); Check(lib.Notes[id].Body.Length > 0, "restore retains content");
                 lib.Repository.Backup(backup); n.PlainText = "changed"; lib.Save(n); lib.Repository.ImportBackup(backup, false); lib.Reload(); lib.Load(lib.Notes[id]); Check(lib.Notes[id].PlainText.Contains("中文"), "transactional restore original content");
                 int count = lib.Notes.Count; Throws(() => lib.Repository.Transaction(() => { lib.Repository.Delete(id); throw new IOException("fault injection"); }), "transaction failure"); Check(lib.Repository.LoadMetadata().Count == count, "transaction rollback");
@@ -74,7 +76,35 @@ namespace DeskPins.Tests
                 var folder = new Folder { Name = "Encrypted", Encrypted = true }; lib.Catalog.Folders.Add(folder); lib.Unlock("password"); var secure = lib.Create(); secure.Body = Encoding.UTF8.GetBytes("secret bytes"); secure.PlainText = "hidden body"; lib.Save(secure); lib.Move(secure, NoteState.Stored, folder.Id); Check(secure.Encrypted && secure.Body == null, "encrypted note unloaded"); lib.Lock(); Throws(() => lib.Load(secure), "locked content rejected"); lib.Unlock("password"); lib.Load(secure); Check(Encoding.UTF8.GetString(secure.Body) == "secret bytes", "encrypted store round trip"); lib.Lock(); Check(!lib.Search("hidden body").Any(), "encrypted body excluded from search");
                 lib.Delete(lib.Notes[id]); Check(!lib.Notes.ContainsKey(id), "delete removes metadata");
             }
-            using (var lib = new NoteLibrary(file)) { Check(!lib.Notes.ContainsKey(id), "deleted note does not return"); Check(lib.Notes.Values.All(n => n.Body == null), "lazy content at startup"); }
+            using (var lib = new NoteLibrary(file))
+            {
+                Check(!lib.Notes.ContainsKey(id), "deleted note does not return");
+                Check(lib.Notes.Values.All(n => n.Body == null), "lazy content at startup");
+                int nextNumber = lib.Catalog.NextNoteNumber; var next = lib.Create();
+                Check(next.Number == nextNumber, "note numbers continue across reload");
+                int expected = nextNumber + 1; next.Number = 0; lib.Save(next); lib.Reload();
+                Check(lib.Notes[next.Id].Number == expected, "note without a number receives the next sequence on reload");
+                Check(lib.Create().Number == expected + 1, "number high-water continues after legacy normalization");
+                string mergeFile = Path.Combine(dir, "merge-source.db");
+                using (var source = new NoteLibrary(mergeFile)) { var a = source.Create(); a.Title = "Merge A"; source.Save(a); var b = source.Create(); b.Title = "Merge B"; source.Save(b); }
+                int before = lib.Notes.Count;
+                lib.Repository.ImportBackup(mergeFile, true); lib.Reload();
+                Check(lib.Notes.Count == before + 2, "merged backup notes are imported");
+                var numbers = lib.Notes.Values.Select(x => x.Number).ToArray();
+                Check(numbers.All(x => x > 0) && numbers.Distinct().Count() == numbers.Length, "merged backup notes receive unique local numbers");
+                Check(lib.Create().Number == numbers.Max() + 1, "number high-water advances after merged import");
+            }
+            using (var lib = new NoteLibrary(file))
+            {
+                foreach (var legacy in lib.Notes.Values) { legacy.Number = 0; lib.Repository.Save(legacy); }
+                lib.Catalog.NextNoteNumber = 1; lib.Repository.SaveCatalog(lib.Catalog);
+            }
+            using (var lib = new NoteLibrary(file))
+            {
+                int legacyCount = lib.Notes.Count;
+                Check(lib.Notes.Values.Select(n => n.Number).OrderBy(n => n).SequenceEqual(Enumerable.Range(1, legacyCount)), "legacy notes without numbers are renumbered from 1");
+                Check(lib.Create().Number == legacyCount + 1, "legacy renumbering continues the sequence");
+            }
             string foreign = Path.Combine(dir, "foreign.db"); using (var db = new Sqlite(foreign)) db.Execute("CREATE TABLE unrelated(value TEXT); INSERT INTO unrelated VALUES('keep');"); var original = File.ReadAllBytes(foreign); Throws(() => { using (var repo = new NoteRepository(foreign)) { } }, "foreign database rejected"); Check(File.ReadAllBytes(foreign).SequenceEqual(original), "foreign database remains unchanged");
         }
         private static void OriginalImport(string dir)
@@ -125,7 +155,7 @@ namespace DeskPins.Tests
             var settings = new Settings { DisabledShortcuts = null }; settings.Normalize();
             Check(settings.DisabledShortcuts != null, "disabled shortcut memory normalizes");
             var migrated = new Settings { Version = 0, DoubleClickRoll = true }; migrated.Normalize();
-            Check(migrated.Version == 3 && migrated.SnapDistance == 10 && migrated.LinksClickable && migrated.ClickMakesVisible && migrated.AlarmSoundEnabled && migrated.HighlightColors.Count == 7 && migrated.DoubleClickAction == "roll" && migrated.SearchDesktop && migrated.SearchContent && migrated.SearchBarExpanded, "settings migration keeps new defaults");
+            Check(migrated.Version == 4 && migrated.SnapDistance == 10 && migrated.LinksClickable && migrated.ClickMakesVisible && migrated.AlarmSoundEnabled && migrated.MarkdownAutoFormat && migrated.HighlightColors.Count == 7 && migrated.DoubleClickAction == "roll" && migrated.SearchDesktop && migrated.SearchContent && migrated.SearchBarExpanded, "settings migration keeps new defaults");
             Check(migrated.ZoomMinFontSize == 5 && migrated.ZoomMaxFontSize == 150, "legacy settings receive integer zoom font limits");
             var zoomRoundTrip = Json.Read<Settings>(Json.Bytes(new Settings { ZoomMinFontSize = 9, ZoomMaxFontSize = 80 }));
             Check(zoomRoundTrip.ZoomMinFontSize == 9 && zoomRoundTrip.ZoomMaxFontSize == 80, "integer zoom font limits persist in settings JSON");
@@ -151,7 +181,7 @@ namespace DeskPins.Tests
         private static void UiTests(string dir)
         {
             System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
-            var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown }; RestoreSafetyTests(dir); var visual = new System.Windows.Media.DrawingVisual(); using (var dc = visual.RenderOpen()) dc.DrawRectangle(System.Windows.Media.Brushes.Yellow, null, new Rect(0, 0, 10, 10)); var target = new System.Windows.Media.Imaging.RenderTargetBitmap(10, 10, 96, 96, System.Windows.Media.PixelFormats.Pbgra32); target.Render(visual); byte[] rendered = new byte[400]; target.CopyPixels(rendered, 40, 0); bool rasterAvailable = rendered.Any(b => b != 0); if (rasterAvailable) Check(true, "WPF pixel rendering"); else Console.WriteLine("SKIP WPF visual pixels: graphics capture unavailable in this environment"); using (var host = new AppHost(Path.Combine(dir, "ui"), true))
+            var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown }; MarkdownTests(); RestoreSafetyTests(dir); var visual = new System.Windows.Media.DrawingVisual(); using (var dc = visual.RenderOpen()) dc.DrawRectangle(System.Windows.Media.Brushes.Yellow, null, new Rect(0, 0, 10, 10)); var target = new System.Windows.Media.Imaging.RenderTargetBitmap(10, 10, 96, 96, System.Windows.Media.PixelFormats.Pbgra32); target.Render(visual); byte[] rendered = new byte[400]; target.CopyPixels(rendered, 40, 0); bool rasterAvailable = rendered.Any(b => b != 0); if (rasterAvailable) Check(true, "WPF pixel rendering"); else Console.WriteLine("SKIP WPF visual pixels: graphics capture unavailable in this environment"); using (var host = new AppHost(Path.Combine(dir, "ui"), true))
             {
                 var n = host.Library.Create(); n.PlainText = "WPF 编辑器\n☐ item"; n.Body = new byte[0]; host.Library.Save(n); host.Sync(); var w = host.Windows[n.Id]; Check(w.TextEditor != null, "WPF text window created"); w.TextEditor.SelectAll(); w.TextEditor.Format("bold"); w.Flush(); Check(n.Body.Length > 30 && n.PlainText.Contains("WPF"), "WPF RTF serialization"); var editor = new TextEditor(); editor.Read(n); Check(new System.Windows.Documents.TextRange(editor.Document.ContentStart, editor.Document.ContentEnd).Text.Contains("WPF"), "WPF RTF reload");
                 host.Library.Catalog.Settings.ZoomMinFontSize = 10; host.Library.Catalog.Settings.ZoomMaxFontSize = 12;
@@ -234,6 +264,137 @@ namespace DeskPins.Tests
                 Check(host.Library.Notes[id].Title == "Backup title" && Directory.GetFiles(data, "before-restore-*.db").Length == beforeCount, "invalid identifiers never commit or create protection backups");
             }
         }
+        private static void MarkdownTests()
+        {
+            Check(MarkdownRenderer.LooksLikeMarkdown("# 标题") && MarkdownRenderer.LooksLikeMarkdown("- 项目") && MarkdownRenderer.LooksLikeMarkdown("**粗体**") && !MarkdownRenderer.LooksLikeMarkdown("普通文本"), "markdown paste detection recognizes block and inline syntax");
+            var font = new FontFamily("Verdana");
+            var document = MarkdownRenderer.ToFlowDocument("# 标题\n\n**粗体** 与 *斜体* 与 `code` 与 [链接](https://example.com)\n\n- 一\n- 二\n\n> 引用\n\n```\nvar x = 1;\n```", 17, font);
+            var blocks = document.Blocks.ToArray();
+            var heading = blocks.OfType<Paragraph>().First();
+            Check(heading.FontWeight == FontWeights.Bold && heading.FontSize > 17, "markdown heading gets bold paragraph sizing");
+            var list = blocks.OfType<System.Windows.Documents.List>().Single();
+            Check(list.ListItems.Count == 2, "markdown list renders list items");
+            var quote = blocks.OfType<Paragraph>().FirstOrDefault(p => p.BorderThickness.Left > 0);
+            Check(quote != null && quote.FontStyle == FontStyles.Italic, "markdown quote renders with a left rule");
+            var code = blocks.OfType<Paragraph>().FirstOrDefault(p => p.FontFamily.Source.Contains("Consolas"));
+            Check(code != null, "fenced code renders in monospace");
+            var taskDocument = MarkdownRenderer.ToFlowDocument("- [ ] 待办\n- [x] 完成", 17, font);
+            var taskList = taskDocument.Blocks.OfType<System.Windows.Documents.List>().Single();
+            Check(taskList.MarkerStyle == TextMarkerStyle.None && new TextRange(taskList.ContentStart, taskList.ContentEnd).Text.Contains("☑"), "task list renders checkboxes without an extra bullet");
+            string taskMarkdown = MarkdownExporter.ToMarkdown(taskDocument, 17);
+            Check(taskMarkdown.Contains("- [ ] 待办") && taskMarkdown.Contains("- [x] 完成"), "task list exports back to markdown checkboxes");
+            var inlineParagraph = blocks.OfType<Paragraph>().First(p => new TextRange(p.ContentStart, p.ContentEnd).Text.Contains("粗体"));
+            Check(Descendants(inlineParagraph).OfType<Run>().Any(r => r.FontWeight == FontWeights.Bold) && Descendants(inlineParagraph).OfType<Hyperlink>().Any(), "markdown inline emphasis and links render");
+
+            var editor = new TextEditor();
+            editor.Document.Blocks.Clear(); editor.Document.Blocks.Add(new Paragraph(new Run("**粗体** 与 *斜体* 与 [链接](https://example.com)")));
+            editor.CaretPosition = editor.Document.ContentEnd;
+            MarkdownEditing.CommitInline(editor);
+            var committed = (Paragraph)editor.Document.Blocks.First();
+            string committedText = new TextRange(committed.ContentStart, committed.ContentEnd).Text;
+            Check(!committedText.Contains("**") && !committedText.Contains("*斜体*") && Descendants(committed).OfType<Run>().Any(r => r.FontWeight == FontWeights.Bold) && Descendants(committed).OfType<Run>().Any(r => r.FontStyle == FontStyles.Italic) && Descendants(committed).OfType<Hyperlink>().Any(), "typing markdown converts inline styles on enter");
+
+            var lineEditor = new TextEditor();
+            lineEditor.Document.Blocks.Clear(); lineEditor.Document.Blocks.Add(new Paragraph());
+            lineEditor.CaretPosition = lineEditor.Document.ContentEnd; lineEditor.CaretPosition.InsertTextInRun("#"); lineEditor.CaretPosition = lineEditor.Document.ContentEnd;
+            Check(MarkdownEditing.TryAutoFormat(lineEditor), "heading marker is consumed on space");
+            var lineParagraph = (Paragraph)lineEditor.Document.Blocks.First();
+            Check(new TextRange(lineParagraph.ContentStart, lineParagraph.ContentEnd).Text == "" && lineParagraph.FontWeight == FontWeights.Bold && lineParagraph.FontSize > lineEditor.Document.FontSize, "heading marker applies bold paragraph size");
+            lineEditor.CaretPosition = lineEditor.Document.ContentEnd; lineEditor.CaretPosition.InsertTextInRun("标题"); lineEditor.CaretPosition = lineEditor.Document.ContentEnd;
+            Check(MarkdownEditing.Enter(lineEditor), "enter after a heading inserts a normal paragraph");
+            var afterHeading = lineEditor.Document.Blocks.OfType<Paragraph>().Last();
+            Check(afterHeading.FontWeight == FontWeights.Normal && afterHeading.FontSize == lineEditor.Document.FontSize && lineEditor.CaretPosition.Paragraph == afterHeading, "heading enter continues in normal body text");
+
+            var bulletEditor = new TextEditor();
+            bulletEditor.Document.Blocks.Clear(); bulletEditor.Document.Blocks.Add(new Paragraph());
+            bulletEditor.CaretPosition = bulletEditor.Document.ContentEnd; bulletEditor.CaretPosition.InsertTextInRun("- [ ]"); bulletEditor.CaretPosition = bulletEditor.Document.ContentEnd;
+            Check(MarkdownEditing.TryAutoFormat(bulletEditor), "task marker is consumed on space");
+            var bulletList = bulletEditor.Document.Blocks.OfType<System.Windows.Documents.List>().FirstOrDefault();
+            Check(bulletList != null && new TextRange(bulletList.ContentStart, bulletList.ContentEnd).Text.Contains("☐"), "task marker becomes a checkbox list item");
+
+            var checkedEditor = new TextEditor();
+            checkedEditor.Document.Blocks.Clear(); checkedEditor.Document.Blocks.Add(new Paragraph());
+            checkedEditor.CaretPosition = checkedEditor.Document.ContentEnd; checkedEditor.CaretPosition.InsertTextInRun("- [x]"); checkedEditor.CaretPosition = checkedEditor.Document.ContentEnd;
+            Check(MarkdownEditing.TryAutoFormat(checkedEditor) && new TextRange(checkedEditor.Document.ContentStart, checkedEditor.Document.ContentEnd).Text.Contains("☑"), "checked task marker becomes a checked checkbox");
+
+            var quoteEditor = new TextEditor();
+            quoteEditor.Document.Blocks.Clear(); quoteEditor.Document.Blocks.Add(new Paragraph());
+            quoteEditor.CaretPosition = quoteEditor.Document.ContentEnd; quoteEditor.CaretPosition.InsertTextInRun(">"); quoteEditor.CaretPosition = quoteEditor.Document.ContentEnd;
+            Check(MarkdownEditing.TryAutoFormat(quoteEditor), "quote marker is consumed on space");
+            var quoteParagraph = (Paragraph)quoteEditor.Document.Blocks.First();
+            Check(quoteParagraph.FontStyle == FontStyles.Italic && quoteParagraph.BorderThickness.Left > 0, "quote marker applies quote styling");
+
+            var orderedEditor = new TextEditor();
+            orderedEditor.Document.Blocks.Clear(); orderedEditor.Document.Blocks.Add(new Paragraph());
+            orderedEditor.CaretPosition = orderedEditor.Document.ContentEnd; orderedEditor.CaretPosition.InsertTextInRun("1."); orderedEditor.CaretPosition = orderedEditor.Document.ContentEnd;
+            Check(MarkdownEditing.TryAutoFormat(orderedEditor) && orderedEditor.Document.Blocks.OfType<System.Windows.Documents.List>().Any(l => l.MarkerStyle == TextMarkerStyle.Decimal), "numbered marker becomes a numbered list");
+
+            var undoEditor = new TextEditor();
+            undoEditor.Document.Blocks.Clear(); undoEditor.Document.Blocks.Add(new Paragraph());
+            undoEditor.CaretPosition = undoEditor.Document.ContentEnd; undoEditor.CaretPosition.InsertTextInRun("#"); undoEditor.CaretPosition = undoEditor.Document.ContentEnd;
+            Check(MarkdownEditing.TryAutoFormat(undoEditor) && new TextRange(undoEditor.Document.ContentStart, undoEditor.Document.ContentEnd).Text.Trim().Length == 0, "heading marker conversion groups into the editor change block");
+
+            var pasteEditor = new TextEditor();
+            pasteEditor.Document.Blocks.Clear(); pasteEditor.Document.Blocks.Add(new Paragraph());
+            pasteEditor.CaretPosition = pasteEditor.Document.ContentEnd;
+            Check(MarkdownEditing.Insert(pasteEditor, "# 粘贴标题\n\n- 甲\n- 乙"), "markdown block paste is inserted");
+            Check(pasteEditor.Document.Blocks.OfType<Paragraph>().Any(p => p.FontWeight == FontWeights.Bold) && pasteEditor.Document.Blocks.OfType<System.Windows.Documents.List>().Any(), "pasted markdown renders blocks");
+            var inlinePasteEditor = new TextEditor();
+            inlinePasteEditor.Document.Blocks.Clear(); inlinePasteEditor.Document.Blocks.Add(new Paragraph());
+            inlinePasteEditor.CaretPosition = inlinePasteEditor.Document.ContentEnd;
+            Check(MarkdownEditing.Insert(inlinePasteEditor, "**行内粘贴**"), "inline markdown paste is inserted");
+            Check(Descendants(inlinePasteEditor.Document.Blocks.First()).OfType<Run>().Any(r => r.FontWeight == FontWeights.Bold), "inline markdown paste applies formatting");
+
+            var menuEditor = new TextEditor();
+            menuEditor.Document.Blocks.Clear(); menuEditor.Document.Blocks.Add(new Paragraph(new Run("菜单标题")));
+            menuEditor.CaretPosition = menuEditor.Document.ContentEnd;
+            MarkdownEditing.ApplyHeading(menuEditor, 2);
+            var menuHeading = (Paragraph)menuEditor.Document.Blocks.First();
+            Check(menuHeading.FontWeight == FontWeights.Bold && menuHeading.FontSize > menuEditor.Document.FontSize, "markdown menu applies heading level");
+            MarkdownEditing.ApplyHeading(menuEditor, 0);
+            Check(menuHeading.FontWeight == FontWeights.Normal && menuHeading.FontSize == menuEditor.Document.FontSize, "markdown menu body resets heading");
+            MarkdownEditing.ToggleQuote(menuEditor);
+            Check(menuHeading.BorderThickness.Left > 0 && menuHeading.FontStyle == FontStyles.Italic, "markdown menu toggles quote on");
+            MarkdownEditing.ToggleQuote(menuEditor);
+            Check(menuHeading.BorderThickness.Left == 0 && menuHeading.FontStyle == FontStyles.Normal, "markdown menu toggles quote off");
+            MarkdownEditing.ApplyCodeBlock(menuEditor);
+            Check(menuHeading.FontFamily.Source.Contains("Consolas"), "markdown menu applies code block");
+            var ruleEditor = new TextEditor();
+            ruleEditor.Document.Blocks.Clear(); ruleEditor.Document.Blocks.Add(new Paragraph(new Run("上方")));
+            ruleEditor.CaretPosition = ruleEditor.Document.ContentEnd;
+            MarkdownEditing.InsertHorizontalRule(ruleEditor);
+            Check(ruleEditor.Document.Blocks.OfType<Paragraph>().Any(p => new TextRange(p.ContentStart, p.ContentEnd).Text.Trim() == "────"), "markdown menu inserts a horizontal rule");
+            Check(MarkdownExporter.ToMarkdown(ruleEditor.Document, ruleEditor.Document.FontSize).Contains("---"), "horizontal rule exports as markdown");
+            var taskMenuEditor = new TextEditor();
+            taskMenuEditor.Document.Blocks.Clear(); taskMenuEditor.Document.Blocks.Add(new Paragraph(new Run("菜单任务")));
+            taskMenuEditor.CaretPosition = taskMenuEditor.Document.ContentEnd;
+            MarkdownEditing.ApplyTaskList(taskMenuEditor);
+            Check(taskMenuEditor.Document.Blocks.OfType<System.Windows.Documents.List>().Any() && new TextRange(taskMenuEditor.Document.ContentStart, taskMenuEditor.Document.ContentEnd).Text.Contains("☐"), "markdown menu applies task list");
+            var inlineCodeEditor = new TextEditor();
+            inlineCodeEditor.Document.Blocks.Clear(); inlineCodeEditor.Document.Blocks.Add(new Paragraph(new Run("行内代码")));
+            var inlineCodeParagraph = (Paragraph)inlineCodeEditor.Document.Blocks.First();
+            inlineCodeEditor.Selection.Select(inlineCodeParagraph.ContentStart, inlineCodeParagraph.ContentEnd);
+            Check(MarkdownEditing.ApplyInlineCode(inlineCodeEditor), "markdown menu applies inline code");
+            Check((inlineCodeEditor.Selection.GetPropertyValue(TextElement.FontFamilyProperty) as FontFamily)?.Source.Contains("Consolas") == true, "inline code uses a monospace font");
+            var convertEditor = new TextEditor();
+            convertEditor.Document.Blocks.Clear(); convertEditor.Document.Blocks.Add(new Paragraph(new Run("**转换**")));
+            convertEditor.Selection.Select(convertEditor.Document.ContentStart, convertEditor.Document.ContentEnd);
+            Check(MarkdownEditing.ConvertSelection(convertEditor) && !new TextRange(convertEditor.Document.ContentStart, convertEditor.Document.ContentEnd).Text.Contains("**") && Descendants(convertEditor.Document.Blocks.First()).OfType<Run>().Any(r => r.FontWeight == FontWeights.Bold), "markdown menu converts selected source text");
+
+            string markdown = MarkdownExporter.ToMarkdown(document);
+            Check(markdown.Contains("# 标题") && markdown.Contains("- 一") && markdown.Contains("**粗体**") && markdown.Contains("[链接](https://example.com)") && markdown.Contains("```"), "flow document exports headings, lists, emphasis, links and code");
+
+            var note = new Note { FontName = "Verdana", FontSize = 10 };
+            var saved = new TextEditor(); saved.Document = MarkdownRenderer.ToFlowDocument("# 标题\n\n- 一\n- 二\n\n**粗体**", 17, font); saved.Write(note);
+            var reloaded = new TextEditor(); reloaded.Read(note);
+            Check(reloaded.PlainText.Contains("标题") && reloaded.PlainText.Contains("一") && !reloaded.PlainText.Contains("#") && reloaded.Document.Blocks.OfType<System.Windows.Documents.List>().Any(), "markdown rendering survives RTF round trip");
+            var reloadedHeading = (Paragraph)reloaded.Document.Blocks.First();
+            var reloadedRange = new TextRange(reloadedHeading.ContentStart, reloadedHeading.ContentEnd);
+            Check((double)reloadedRange.GetPropertyValue(TextElement.FontSizeProperty) > 17 && (FontWeight)reloadedRange.GetPropertyValue(TextElement.FontWeightProperty) == FontWeights.Bold, "markdown heading styling survives RTF round trip");
+            string reloadedMarkdown = MarkdownExporter.ToMarkdown(reloaded.Document, 17);
+            Check(reloadedMarkdown.Contains("# 标题") && reloadedMarkdown.Contains("**粗体**"), "markdown export still recognizes headings after RTF reload");
+        }
+
         private static void InteractionTests(AppHost host)
         {
             var first = host.Library.Create(); var second = host.Library.Create();
@@ -250,6 +411,11 @@ namespace DeskPins.Tests
             }
             Ui.LoadLanguage(DeskPins.App.Localization.Chinese);
             host.Focus(first); Check(System.Windows.Input.FocusManager.GetFocusedElement(host.Windows[first.Id]) == host.Windows[first.Id].TextEditor, "focusing note targets text editor for immediate typing");
+            host.NoteActivated(host.Windows[first.Id]); host.NoteActivated(host.Windows[second.Id]);
+            var focusOrder = Field<System.Collections.Generic.List<string>>(host, "focusOrder");
+            Check(focusOrder.Last() == second.Id, "activation moves the newest note to the front of focus order");
+            host.NoteActivated(host.Windows[first.Id]);
+            Check(focusOrder.Last() == first.Id && focusOrder.Count(id => id == first.Id) == 1, "refocusing a note moves it to the front without duplicates");
             var copyTarget = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(host.Library.Repository.FilePath)), "data-copy-target");
             var copyPointer = Path.Combine(copyTarget, "pointer.txt");
             host.ApplyDataDirectory(copyTarget, copyPointer);
@@ -298,7 +464,7 @@ namespace DeskPins.Tests
             var renamedNode = TreeItems(tree.Items).FirstOrDefault(n => n.Tag is Folder f && f.Id == folder.Id);
             Check(renamedNode != null && ((System.Windows.Controls.Grid)renamedNode.Header).Children.OfType<System.Windows.Controls.TextBlock>().Any(t => t.Text == folder.Name), "manager navigation reflects collection changes");
             var closedSample = host.Library.Create(); closedSample.Title = "Closed sample"; host.Library.Save(closedSample); host.Library.Move(closedSample, NoteState.Closed); closedSample.ShowId = true;
-            Check(closedSample.ManagerTitle.StartsWith("id " + closedSample.ShortId + " Closed sample"), "closed note title exposes its short id");
+            Check(closedSample.ManagerTitle.StartsWith("id " + closedSample.Number + " Closed sample") && closedSample.Identifier == closedSample.Id, "closed note title exposes its sequence and keeps the guid identifier");
             var firstFolder = new Folder { Name = "Order A" }; var secondFolder = new Folder { Name = "Order B" }; var thirdFolder = new Folder { Name = "Order C" };
             host.Library.Catalog.Folders.Add(firstFolder); host.Library.Catalog.Folders.Add(secondFolder); host.Library.Catalog.Folders.Add(thirdFolder);
             var moveCollection = typeof(ManagerWindow).GetMethod("MoveCollectionItem", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
@@ -370,6 +536,8 @@ namespace DeskPins.Tests
             Check(((System.Windows.Controls.MenuItem)textMenu.Items[1]).InputGestureText == "Ctrl+Alt+C" && host.ActionFor(System.Windows.Input.Key.C, System.Windows.Input.ModifierKeys.Control | System.Windows.Input.ModifierKeys.Alt) == "copy", "menu shortcut matches configured keyboard action"); host.Library.Catalog.Settings.Shortcuts.Remove("copy");
             var textMenuItems = MenuItems(textMenu.Items).Select(m => m.Header.ToString()).ToArray();
             Check(textMenuItems.Contains(Ui.Text("设置全文格式…")) && new[] { "段落", "插入", "项目符号", "插入链接…" }.All(label => textMenuItems.Contains(Ui.Text(label))), "text context menu groups format, paragraph and insertion actions");
+            Check(textWindow.TextEditor.IsInactiveSelectionHighlightEnabled, "text selection stays highlighted when the context menu takes focus");
+            Check(textMenuItems.Contains("Markdown") && new[] { Ui.Text("标题") + " 1", Ui.Text("正文"), Ui.Text("粗体"), Ui.Text("行内代码"), Ui.Text("引用"), Ui.Text("任务列表"), Ui.Text("代码块"), Ui.Text("插入水平线"), Ui.Text("应用 Markdown 到所选文字"), Ui.Text("粘贴 Markdown"), Ui.Text("复制为 Markdown") }.All(label => textMenuItems.Contains(label)), "text context menu exposes every markdown format action");
             textWindow.TextEditor.Selection.Select(textWindow.TextEditor.Document.ContentStart, textWindow.TextEditor.Document.ContentEnd);
             textMenu = (System.Windows.Controls.ContextMenu)typeof(NoteWindow).GetMethod("TextMenu", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(textWindow, null);
             Check(MenuItems(textMenu.Items).Any(m => m.Header.ToString() == Ui.Text("设置所选文字格式…")), "text context menu switches to selected-text formatting");
@@ -398,6 +566,10 @@ namespace DeskPins.Tests
             var noteMenu = (System.Windows.Controls.ContextMenu)typeof(NoteWindow).GetMethod("Menu", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(textWindow, null);
             var noteMenuHeaders = noteMenu.Items.OfType<System.Windows.Controls.MenuItem>().Select(m => m.Header.ToString()).ToList();
             Check(noteMenuHeaders.IndexOf(Ui.Text("新建便签")) >= 0 && noteMenuHeaders.IndexOf(Ui.Text("管理便签…")) > noteMenuHeaders.IndexOf(Ui.Text("新建便签")), "note menu adds New note above Manage notes");
+            Check(noteMenuHeaders.Contains(Ui.Text("属性…")), "note menu exposes note properties");
+            var propertiesDialog = new NotePropertiesWindow(host, closedSample, null);
+            var propertyValues = Descendants((DependencyObject)propertiesDialog.Content).OfType<System.Windows.Controls.TextBox>().Select(t => t.Text).ToArray();
+            Check(propertyValues.Contains(closedSample.Number.ToString()) && propertyValues.Contains(closedSample.Id), "note properties expose sequence and guid identifier");
             var allNoteMenuItems = MenuItems(noteMenu.Items).Select(m => m.Header.ToString()).ToArray();
             Check(new[] { "整理到", "显示与行为", "导出与传输", "存入文件夹", "放入堆叠", "点击穿透", "自动调整高度时固定底边", "仅显示此便签", "保存为…", "打印…", "设置皮肤…" }.All(allNoteMenuItems.Contains), "note menu groups advanced actions without removing operations");
             Check(!noteMenuHeaders.Any(h => h.Contains("Ghost") || h.Contains("Stand") || h.Contains("Solo")), "note menu top level avoids implementation jargon");

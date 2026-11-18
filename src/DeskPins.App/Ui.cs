@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
+using DeskPins.Core;
 
 namespace DeskPins.App
 {
@@ -21,6 +22,18 @@ namespace DeskPins.App
         }
         private static Dictionary<string, string> LoadLanguageDictionary(string file) { using (var stream = System.IO.File.OpenRead(file)) return (Dictionary<string, string>)new System.Runtime.Serialization.Json.DataContractJsonSerializer(typeof(Dictionary<string, string>), new System.Runtime.Serialization.Json.DataContractJsonSerializerSettings { UseSimpleDictionaryFormat = true }).ReadObject(stream); }
         public static string Text(string text) { if (string.IsNullOrEmpty(text)) return text; string translated; return language.TryGetValue(text, out translated) ? translated : text; }
+        public static string StateText(NoteState state)
+        {
+            switch (state)
+            {
+                case NoteState.Desktop: return Text("桌面");
+                case NoteState.Stored: return Text("已收藏");
+                case NoteState.Closed: return Text("已关闭");
+                case NoteState.Sleeping: return Text("休眠中");
+                case NoteState.Recurring: return Text("重复提醒");
+                default: return Text("未知状态");
+            }
+        }
         private static readonly Dictionary<string, Brush> brushCache = new Dictionary<string, Brush>();
         private static readonly DropShadowEffect noteShadow = CreateNoteShadow();
         private static DropShadowEffect CreateNoteShadow() { var effect = new DropShadowEffect { BlurRadius = 10, ShadowDepth = 0, Direction = 270, Opacity = .32, Color = Colors.Black }; effect.Freeze(); return effect; }

@@ -10,10 +10,12 @@
 | 图片算法 | ImageEditor.BeginStroke / ContinueStroke / CommitStroke / CancelEdit / Transform / Crop / ResizeImage、RasterCanvas |
 | 屏幕截取 | AppHost.Capture、CaptureWindow 构造 / Result |
 | 关于窗口 | AboutWindow 构造 / VersionText、AppHost.BuildTray 的“关于 DeskPins”菜单项 |
-| 公共弹框 / 按钮 / 菜单 / 滚动条 | UiTheme.Apply / ApplyThinScrollBars / QueueThinScrollBars / ButtonStyle / ComboBoxStyle、Ui.DialogContent / FitDialog / ActiveWindow / PrimaryButton / DangerButton / Item；NoteWindow.Menu / TextMenu / ImageMenu |
+| 公共弹框 / 按钮 / 菜单 / 滚动条 | UiTheme.Apply / ApplyThinScrollBars / QueueThinScrollBars / ButtonStyle / ComboBoxStyle、Ui.DialogContent / FitDialog / ActiveWindow / PrimaryButton / DangerButton / Item / StateText；NoteWindow.Menu / TextMenu / ImageMenu、NotePropertiesWindow.Show |
 | 窗口边缘缩放 | WindowResize.Attach / Calculate、NoteWindow 构造、StackDockWindow 构造 |
 | 标题栏聚焦色 / Pin 色块 | NoteWindow 构造（indicator 事件）、ApplyAppearance / UpdatePinIndicator |
 | 拖拽吸附 | AppHost.SnapAfterDrag、NoteWindow.DragTitle / MoveSelected |
+| 便签层级 / 聚焦顺序 | NoteWindow 构造（Activated）、AppHost.NoteActivated / ShowAllNotes / RaiseInFocusOrder / BringForward、Native.RaiseNoActivate |
+| Markdown 编辑 / 粘贴 / 导出 | NoteWindow.TextMenu 的 Markdown 子菜单、MarkdownEditing.TryAutoFormat / CommitInline / Enter / ApplyHeading / ToggleQuote / ApplyTaskList / ApplyInlineCode / ApplyCodeBlock / ConvertSelection / PasteMarkdown / CopyMarkdown、MarkdownRenderer.ToFlowDocument / RenderBlocks / RenderInlines / HeadingLevel、MarkdownExporter.ToMarkdown、TextEditor.MarkdownAutoFormat |
 
 ## 3. 重点链路
 
@@ -26,8 +28,13 @@
 - 新建便签统一经过 NoteLibrary.Create：先用 Styles[0] 应用颜色等其他样式，再以 Settings.DefaultFontName / DefaultFontSize 覆盖字体和字号，因此桌面、API 与管理器入口一致，已有便签不受影响。
 - TextEditor.FontDialog 打开 TextFormatWindow；无选区目标为全文，有选区只处理选区。对话框以 dirty 标志保证只有显式修改的属性才应用，混合值和第三态复选框保持不变；下划线 / 删除线共用 Inline.TextDecorationsProperty，ApplyDecoration 按文本段保留另一种装饰。NoteWindow 在右键位于现有选区内时拦截 RichTextBox 的右键按下默认行为，避免选区折叠后再生成格式菜单。
 - 便签窗口透明度恒为 Note.Opacity（右键菜单 / 样式 / API 显式设置），不随焦点变化；聚焦只靠标题栏底色区分（活动 #4A4A4A / 非活动 #6B6B6B，定义在 UiTheme.TitleActiveColor / TitleInactiveColor，堆叠面板头部共用，皮肤窗口沿用皮肤标题色）。标题栏左侧 6px Pin 色块同时是置顶开关：未置顶时悬停预览浅蓝、单击置顶，已置顶时保持 #9CC3E5、再单击取消；色块在 MouseLeftButtonDown 中标记 Handled，避免触发标题拖动 / 双击行为。Secret 便签失焦仍隐藏内容，属隐私行为不受此影响。
+- 便签层级按聚焦顺序：NoteWindow.Activated → AppHost.NoteActivated 把便签 Id 移到 focusOrder 末尾，并 RaiseNoActivate 前置；ClickMakesVisible 打开时 ShowAllNotes 仍显示全部便签，但必须按 focusOrder 逐张前置、把触发显示的便签约在最后，不能再按 Windows 字典顺序批量前置，否则后遍历的便签会盖住刚点击的便签。置顶（Topmost）仍由系统分层保证，未置顶便签不会盖住置顶便签；托盘“前置所有便签”也按 focusOrder 激活最近聚焦的便签。
 - 公共弹框：Ui.DialogContent 提供滚动正文与固定按钮页脚，FitDialog 限工作区并为非任务栏窗口补活动 Owner；PrimaryButton / DangerButton 区分主要 / 危险动作，确认默认 No。输入框在 Loaded 后 Dispatcher 聚焦 / 全选；集合、联系人、提醒、附着验证失败定位字段，危险动作独立并明确后果。ScheduleWindow 仅对已有休眠 / 重复或闹钟显示“现有提醒”清除区。
 - 菜单按需生成：Ui.Item 接收 check / enabled；NoteWindow.Menu 首层保留常用操作，将整理、显示行为、导出传输分别收进二级菜单并保留快捷键，仍标明关闭可恢复、永久删除及传输后关闭；Alt+F4 只关闭当前便签（进入 Closed），不退出应用。TextMenu 按选区动态显示所选文字 / 全文格式，段落、插入和高亮分组，按锁定、选择、剪贴板状态启停；ImageMenu 按锁定、选择、剪贴板和 CanUndo / CanRedo 启停。BuildTray 分新建、显隐 / 管理、工具与退出组；数据维护只在设置页。
+- 便签属性由 NotePropertiesWindow 统一提供：NoteWindow.Menu 的“属性…”与管理器预览 / 右键入口都调用它，只读展示标题、状态、类型、时间、文件夹、堆叠、标签、加密 / 锁定、本地自增序号与完整 GUID 标识符；不要再在各自窗口重复拼一套属性弹框。
+- Markdown 输入分三层：行首 `#` / `-` / `1.` / `>` / `- [ ]` 在空格时由 MarkdownEditing.TryAutoFormat 转换（清除标记、应用段落字号 / 粗体、列表或引用样式）；回车时 CommitInline 用 Markdig 解析当前段，把 `**` / `*` / `~~` / 反引号 / 链接重建为 Run / Span / Hyperlink（仅在段落没有手工格式时），标题段之后再由 Enter 新建普通段落；纯文本粘贴由 TryPaste 检测并整体渲染。正文右键 TextMenu 的 Markdown 子菜单对当前段 / 选区执行标题、粗体 / 斜体 / 删除线、行内代码、链接、列表、引用、任务列表、代码块、水平线、应用 Markdown、粘贴 / 复制 Markdown。RTF 仍是 Note.Body 的存储格式，Markdown 只是输入 / 导出层。
+- TextEditor 必须开启 IsInactiveSelectionHighlightEnabled：右键菜单 / 其他窗口获得焦点时，选中文字仍要显示选区高亮；右键点击选区内由 PreviewMouseRightButtonDown 拦截默认折叠，不能再依赖焦点保持。
+- 标题字号 = 文档基础字号 × 级别系数（MarkdownRenderer.HeadingSize）；导出只识别 H1–H5，H6 与正文粗体同字号，按粗体段落导出。`.md` 导出走 AppHost.ExportTo，用 TextEditor.Read 后 MarkdownExporter.ToMarkdown，不把导出结果反写回 Note.Body。
 
 ## 4. 接口契约
 
@@ -48,3 +55,8 @@
 - ScrollViewer 默认模板会给 ScrollBar 写入系统 17px 宽度，单靠隐式 Style 的 Width setter 不生效；UiTheme.ApplyThinScrollBars 把实际 ScrollBar 的 Width / Height 设为 UiTheme.ThinScrollBarSize（当前 6px），由 UiTheme.Apply 在窗口 Loaded 接入，NoteWindow 创建编辑器和 SettingsWindow 切页后补充调度，ManagerWindow.QueueThinScrollBars 在 Loaded / Refresh / DisplaySelected 后合并调度。不要把“细滚动条”只做成 UiTheme 样式而不验证可见 ScrollBar 的 ActualWidth / ActualHeight。
 - 便签窗口必须同时设置 `WindowStyle=None` 与 `AllowsTransparency=true`，`Window.Opacity` 才会通过 WPF 分层窗口生效；不要再通过 `SetLayeredWindowAttributes` 手动改非透明窗口的 alpha（WPF 会重置 `WS_EX_LAYERED`）。`Native.SetGhost` 只负责 `WS_EX_TRANSPARENT`。
 - 便签透明度不参与焦点状态：OpaqueEditing / RestoreOpacityAfterEditing（编辑强制不透明 + 失焦淡出）已按用户要求移除，聚焦只靠标题栏高亮区分，不要再引入随焦点变化的透明度或动画。
+- 不要在 Activated / ShowAllNotes 中按 Windows.Values（字典顺序，与聚焦无关）批量 RaiseNoActivate：最后遍历到的便签会盖住用户刚点击的便签。层级只认 AppHost.focusOrder，聚焦变化走 NoteActivated；focusOrder 是会话内顺序、不持久化，重启后按便签恢复创建顺序。
+- Markdown 转换只在输入边界（空格 / 回车 / 粘贴）执行，不要在 TextChanged 里全量解析，否则会打断光标、输入法和撤销栈。段落已有手工格式或超链接时 CommitInline 必须跳过，避免重建 Inlines 丢失格式。
+- NormalizeParagraphMargins 仍会把段落 Margin 归零；标题 / 引用不要依赖 Margin 做间距（引用用 Padding / Border，标题用字号 / 粗体）。标题字号由基础字号推导，导出必须传入与创建时一致的基础字号，否则 H1–H5 识别会错位；新增 Markdown 语法要同时补 RTF 往返测试。
+- Markdown 解析使用 Markdig（BSD-2-Clause，用户批准的第三方依赖），只取 AST，WPF 渲染自写；不要引入 Markdig.Wpf / HTML 渲染器。构建需要 NuGet 还原，发布包必须带上 Markdig.dll 与 System.Buffers / System.Memory / System.Numerics.Vectors / System.Runtime.CompilerServices.Unsafe，`scripts/build.ps1`、`scripts/package.ps1` 的复制清单要保持同步。
+- 右键菜单弹出会夺走键盘焦点，WPF 默认隐藏非活动选区；TextEditor 必须保持 IsInactiveSelectionHighlightEnabled=true，并继续在 PreviewMouseRightButtonDown 中拦截选区内右键的默认折叠，否则会出现“选中文字后右键，选区渲染消失”。

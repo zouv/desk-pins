@@ -19,7 +19,7 @@
 - ApplySettingsReport 分别报告语言、各全局快捷键、网络、界面与附着错误；ApplySteps 捕获单项异常并继续后续项。语言加载成功且 appliedLanguage 真正变化时 RefreshLanguageSurfaces：保存编辑、重开管理器 / 堆叠、重建托盘、刷新原便签窗口；全部刷新成功后才推进 appliedLanguage，失败可重试。
 - 数据目录：ValidateDataDirectory 只检查路径与已有库，不创建目录 / 数据库 / 指针；ApplyDataDirectory 对空目标用 SQLite Backup 复制，对已有库只切换，再写指针供重启。SettingsWindow 只在 pendingDataDirectory 不同于成功应用基线时调用；选回当前运行目录也必须更新指针。
 - 快捷键统一走 Ui.TryParseGesture / FormatGesture：支持无修饰普通键与 F1–F24；全局快捷键保存时必须带修饰键或功能键。全局新建 / 显隐 / 管理分别注册 HotKey ID 1 / 2 / 3；其中管理是 toggle：管理器前台时关闭，后台或未打开时打开。
-- 设置表单：Appearance 顶部设置新建便签默认字体 / 整数 px 字号，样式下拉管理颜色 / 字体样式 / 透明度 / Tab 宽度 / 示例 / 阴影 / 皮肤（第一项的字体与字号不再用于新建便签）；Content 管理链接、复选框、Shift+Ctrl 方向、Ctrl+滚轮字号范围、7 个高亮色和图片行为；Alerts 管理唤醒默认值、声音文件与响铃；Desktop 管理启动隐藏、关闭确认、吸附距离 / 间隙和双击标题栏行为。快捷键搜索有持久可见标签；设置标签列 220px，开关整行可点击且文字不重复触发，导航与开关模板提供键盘焦点反馈。
+- 设置表单：Appearance 顶部设置新建便签默认字体 / 整数 px 字号，样式下拉管理颜色 / 字体样式 / 透明度 / Tab 宽度 / 示例 / 阴影 / 皮肤（第一项的字体与字号不再用于新建便签）；Content 管理链接、复选框、Shift+Ctrl 方向、Markdown 自动格式化、Ctrl+滚轮字号范围、7 个高亮色和图片行为；Alerts 管理唤醒默认值、声音文件与响铃；Desktop 管理启动隐藏、关闭确认、吸附距离 / 间隙和双击标题栏行为。快捷键搜索有持久可见标签；设置标签列 220px，开关整行可点击且文字不重复触发，导航与开关模板提供键盘焦点反馈。
 
 ## 4. 接口契约
 
@@ -27,7 +27,7 @@
 - SettingsFieldState：Key / Category / StyleIndex / ShortcutTab 定位字段，Raw / Error 跨控件重建保留；Check 校验通过才调用 Apply 写草稿。Control / RefreshFeedback 仅引用当前控件，不作为数据源。
 - SettingsWindow.settings 与 Catalog.Settings 必须深拷贝隔离；Save 提交独立副本。pendingDataDirectory 是待选目录，appliedDataDirectory 是最后成功写指针的目录，host.DataDirectory 始终是运行库位置；ReloadDraft 回到成功应用目录基线。
 - AppHost.ApplySteps 接收命名 Action 序列并返回错误列表，单项失败不中断循环；ApplySettingsReport 返回运行期应用错误，testMode 下不做外部应用。错误不表示 Catalog 提交失败，也不自动回滚已提交设置。
-- Settings.Version：Catalog 升级时 Normalize 从旧版本补齐新增选项（链接、阴影、高亮色、吸附距离、图片类型等）；不要只看字段默认值，旧 JSON 缺字段会得到 false/0。Version < 3 会补开六个搜索范围、SearchContent 和 SearchBarExpanded。
+- Settings.Version：Catalog 升级时 Normalize 从旧版本补齐新增选项（链接、阴影、高亮色、吸附距离、图片类型、Markdown 自动格式化等）；不要只看字段默认值，旧 JSON 缺字段会得到 false/0。Version < 3 会补开六个搜索范围、SearchContent 和 SearchBarExpanded，Version < 4 会默认开启 MarkdownAutoFormat。
 - Settings.DefaultFontName / DefaultFontSize 只用于 NoteLibrary.Create 新建便签，默认 Verdana / 10px；DefaultFontSize 与 ZoomMinFontSize / ZoomMaxFontSize 均按整数 px 持久化，范围 1–200，缩放范围默认 5 / 150。Normalize 将旧小数四舍五入（远离零）、补默认值并交换反向缩放范围；ValidateSettings 拒绝非整数。TextEditor.Scale 接收 delta 与 px 范围，返回缩放后最小 / 最大 px Tuple；RTF 以 0.5 pt 精度存储，因此 Read 后必须归一化各段为整数 px，保存往返不承诺保留旧小数值。
 - Settings.Shortcuts：空字符串表示停用该应用内快捷键；DisabledShortcuts 保存停用前的手势，仅用于设置界面恢复显示，不参与键盘分发。GlobalNewKey / GlobalToggleKey / GlobalManageKey 为空同样表示关闭。
 - 数据目录不在 Catalog 内：DataLocation 的指针文件决定下次启动目录；`--data-dir` 命令行优先，显式参数会覆盖指针。

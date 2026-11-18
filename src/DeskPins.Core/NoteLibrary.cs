@@ -16,6 +16,7 @@ namespace DeskPins.Core
         public event Action<Note> Alarm;
         public event Action<Note> Woke;
         private bool inTransaction;
+        private readonly object numberLock = new object();
         public NoteLibrary(string path) { Repository = new NoteRepository(path); try { Reload(); } catch { Repository.Dispose(); throw; } }
         public void Reload()
         {
@@ -23,11 +24,35 @@ namespace DeskPins.Core
             var notes = Repository.LoadMetadata().ToDictionary(n => n.Id);
             Catalog = catalog; SessionPassword = null; Notes.Clear();
             foreach (var pair in notes) Notes.Add(pair.Key, pair.Value);
+            NormalizeNumbers();
             Notify();
         }
-        public Note Create(NoteKind kind = NoteKind.Text) { var n = new Note { Kind = kind, Body = new byte[0], PlainText = "" }; Catalog.Settings.Styles[0].Apply(n); n.FontName = Catalog.Settings.DefaultFontName; n.FontSize = Catalog.Settings.DefaultFontSize; n.WakeTopmost = Catalog.Settings.WakeTopmostMode == "off" ? false : Catalog.Settings.WakeTopmostMode == "on" ? true : n.Topmost; n.WakeAlarm = Catalog.Settings.WakeAlarm; n.WakeSound = Catalog.Settings.WakeSoundEnabled; n.Left += Notes.Count % 8 * 22; n.Top += Notes.Count % 8 * 22; Notes.Add(n.Id, n); Save(n); return n; }
-        public void Add(Note n) { if (Notes.ContainsKey(n.Id)) n.Id = Guid.NewGuid().ToString("N"); Notes.Add(n.Id, n); Save(n); }
-        public Note Copy(Note n) { Load(n); var c = n.Clone(); c.Left += 20; c.Top += 20; c.State = NoteState.Desktop; c.StackId = ""; c.Attachment = null; c.Repeat = null; c.WakeUtc = null; c.AlarmUtc = null; c.Encrypted = false; Notes.Add(c.Id, c); Save(c); return c; }
+        // 旧库 / 旧备份的 Number 可能缺失或重复：保留已有唯一序号，其余按 rowid（加载）顺序补号，并抬高高水位。
+        private void NormalizeNumbers()
+        {
+            Catalog.Normalize();
+            var used = new HashSet<int>();
+            var keep = new HashSet<Note>();
+            foreach (var n in Notes.Values) if (n.Number > 0 && used.Add(n.Number)) keep.Add(n);
+            int next = Math.Max(1, Catalog.NextNoteNumber);
+            foreach (var n in keep) if (n.Number >= next) next = n.Number + 1;
+            var assigned = new List<Note>();
+            foreach (var n in Notes.Values) if (!keep.Contains(n)) { n.Number = next++; assigned.Add(n); }
+            bool changed = assigned.Count > 0 || Catalog.NextNoteNumber != next;
+            Catalog.NextNoteNumber = next;
+            if (changed) PersistNumbers(assigned, true);
+        }
+        private int AllocateNumber() { lock (numberLock) { var number = Math.Max(1, Catalog.NextNoteNumber); Catalog.NextNoteNumber = number + 1; return number; } }
+        // 序号只用于展示；回写失败不能阻断便签保存，退出时的 SaveCatalog 会再持久化一次。
+        private void PersistNumbers(IEnumerable<Note> notes, bool catalog)
+        {
+            Action write = () => { if (notes != null) foreach (var n in notes) Repository.Save(n); if (catalog) Repository.SaveCatalog(Catalog); };
+            try { if (inTransaction) write(); else Repository.Transaction(write); }
+            catch { }
+        }
+        public Note Create(NoteKind kind = NoteKind.Text) { var n = new Note { Kind = kind, Body = new byte[0], PlainText = "", Number = AllocateNumber() }; Catalog.Settings.Styles[0].Apply(n); n.FontName = Catalog.Settings.DefaultFontName; n.FontSize = Catalog.Settings.DefaultFontSize; n.WakeTopmost = Catalog.Settings.WakeTopmostMode == "off" ? false : Catalog.Settings.WakeTopmostMode == "on" ? true : n.Topmost; n.WakeAlarm = Catalog.Settings.WakeAlarm; n.WakeSound = Catalog.Settings.WakeSoundEnabled; n.Left += Notes.Count % 8 * 22; n.Top += Notes.Count % 8 * 22; Notes.Add(n.Id, n); Save(n); PersistNumbers(null, true); return n; }
+        public void Add(Note n) { if (Notes.ContainsKey(n.Id)) n.Id = Guid.NewGuid().ToString("N"); n.Number = AllocateNumber(); Notes.Add(n.Id, n); Save(n); PersistNumbers(null, true); }
+        public Note Copy(Note n) { Load(n); var c = n.Clone(); c.Number = AllocateNumber(); c.Left += 20; c.Top += 20; c.State = NoteState.Desktop; c.StackId = ""; c.Attachment = null; c.Repeat = null; c.WakeUtc = null; c.AlarmUtc = null; c.Encrypted = false; Notes.Add(c.Id, c); Save(c); PersistNumbers(null, true); return c; }
         public void Load(Note n)
         {
             Repository.LoadContent(n);
@@ -115,7 +140,7 @@ namespace DeskPins.Core
                     {
                         Repository.LoadContent(n);
                         bool duplicate = Catalog.Settings.PreventDuplicates && n.Kind == NoteKind.Text && Notes.Values.Any(x => { if (x.State != NoteState.Desktop || x.Kind != NoteKind.Text || x.Left != n.Left || x.Top != n.Top || x.Preview != n.Preview) return false; Load(x); return x.PlainText == n.PlainText && x.Body.SequenceEqual(n.Body); });
-                        if (!duplicate) { Load(n); var clone = n.Clone(); clone.State = NoteState.Desktop; clone.RecurrenceSourceId = n.Id; clone.Repeat = null; clone.WakeUtc = null; clone.Topmost = n.WakeTopmost; Notes.Add(clone.Id, clone); Save(clone); Wake(clone); }
+                        if (!duplicate) { Load(n); var clone = n.Clone(); clone.Number = AllocateNumber(); clone.State = NoteState.Desktop; clone.RecurrenceSourceId = n.Id; clone.Repeat = null; clone.WakeUtc = null; clone.Topmost = n.WakeTopmost; Notes.Add(clone.Id, clone); Save(clone); PersistNumbers(null, true); Wake(clone); }
                         var next = RepeatSchedule.Next(n.Repeat, nowUtc.ToLocalTime());
                         if (next == null) Delete(n); else { n.WakeUtc = RepeatSchedule.ToUtc(next.Value); Save(n); }
                     }

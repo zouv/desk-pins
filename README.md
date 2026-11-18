@@ -34,7 +34,7 @@
 
 ## 依赖与前置条件
 
-运行需要 Windows 10 / 11 x64 和 .NET Framework 4.8。开发需要 .NET SDK 与 .NET Framework 4.8 Developer Pack；命令行 `manager.sh`、文档检查和 `verify.bat` 还需要 Git for Windows（提供 bash），双击 `build / dev / run / test / package` 只需 PowerShell。无需 Node、浏览器组件或第三方运行时。
+运行需要 Windows 10 / 11 x64 和 .NET Framework 4.8。开发需要 .NET SDK 与 .NET Framework 4.8 Developer Pack；命令行 `manager.sh`、文档检查和 `verify.bat` 还需要 Git for Windows（提供 bash），双击 `build / dev / run / test / package` 只需 PowerShell。无需 Node、浏览器组件或第三方运行时。构建时通过 NuGet 还原 Markdig（Markdown 解析，BSD-2-Clause），随程序打包，不需要用户单独安装；许可见 `docs/04-第三方依赖.md`。
 
 ## 技术栈
 

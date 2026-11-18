@@ -46,7 +46,7 @@ function Invoke-Build([string]$Configuration, [string]$Log) {
 
 function Copy-AppFiles([string]$Configuration, [string]$Destination, [bool]$IncludeSymbols) {
     $source = Join-Path $appOutput "$Configuration/net48"
-    $names = @('DeskPins.exe', 'DeskPins.exe.config', 'DeskPins.Core.dll')
+    $names = @('DeskPins.exe', 'DeskPins.exe.config', 'DeskPins.Core.dll', 'Markdig.dll', 'System.Buffers.dll', 'System.Memory.dll', 'System.Numerics.Vectors.dll', 'System.Runtime.CompilerServices.Unsafe.dll')
     if ($IncludeSymbols) { $names += @('DeskPins.pdb', 'DeskPins.Core.pdb') }
     foreach ($name in $names) {
         $file = Join-Path $source $name

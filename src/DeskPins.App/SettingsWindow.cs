@@ -407,6 +407,8 @@ namespace DeskPins.App
             SwitchRow(grid, "文本中的链接可以点击", settings.LinksClickable, v => settings.LinksClickable = v);
             SwitchRow(grid, "插入复选框时额外留一个空格", settings.CheckboxTrailingSpace, v => settings.CheckboxTrailingSpace = v);
             SwitchRow(grid, "同时按下 Shift 和 Ctrl 切换文字方向", settings.ShiftCtrlDirection, v => settings.ShiftCtrlDirection = v);
+            SwitchRow(grid, "Markdown 自动格式化", settings.MarkdownAutoFormat, v => settings.MarkdownAutoFormat = v);
+            AddHintRow(grid, "输入 # 标题、- 列表、> 引用、- [ ] 任务，或在回车 / 粘贴时自动转换 Markdown；关闭后按纯文本处理。");
             AddSection(grid, "Ctrl+滚轮缩放");
             NumberControl(grid, "ZoomMinFontSize", "最小字号（px）", (int)settings.ZoomMinFontSize, v => settings.ZoomMinFontSize = v, 1, 200, 70);
             NumberControl(grid, "ZoomMaxFontSize", "最大字号（px）", (int)settings.ZoomMaxFontSize, v => settings.ZoomMaxFontSize = v, 1, 200, 70);
@@ -473,7 +475,7 @@ namespace DeskPins.App
             AddHintRow(grid, "以下即时操作始终作用于当前运行目录，与待保存的设置无关。");
             AddSection(grid, "即时导入");
             var imports = new WrapPanel();
-            imports.Children.Add(Ui.Button("导入便签…", () => RunDataAction(() => { var file = Ui.OpenFile("便签与内容|*.dpn;*.sti;*.rtf;*.txt;*.png;*.jpg;*.bmp", this); if (file != null) host.Import(file); })));
+            imports.Children.Add(Ui.Button("导入便签…", () => RunDataAction(() => { var file = Ui.OpenFile("便签与内容|*.dpn;*.sti;*.md;*.rtf;*.txt;*.png;*.jpg;*.bmp", this); if (file != null) host.Import(file); })));
             imports.Children.Add(Ui.Button("从传输文件导入", () => RunDataAction(() => host.ImportTransfer())));
             imports.Children.Add(Ui.Button("导入 Stickies v10 数据库…", () => RunDataAction(() => host.ImportStickies())));
             AddFullRow(grid, imports);

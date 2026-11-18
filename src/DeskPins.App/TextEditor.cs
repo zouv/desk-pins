@@ -20,6 +20,7 @@ namespace DeskPins.App
         private static object[] copiedFormat;
         public bool LinksClickable = true;
         public bool CheckboxTrailingSpace = true;
+        public bool MarkdownAutoFormat = true;
         public string PlainText { get { return new TextRange(Document.ContentStart, Document.ContentEnd).Text.TrimEnd('\r', '\n'); } }
         public string SelectedPlainText { get { return Selection.IsEmpty ? PlainText : Selection.Text; } }
         public void CopyFormat() { copiedFormat = formatProperties.Select(p => Selection.GetPropertyValue(p)).ToArray(); }
@@ -29,12 +30,22 @@ namespace DeskPins.App
         public TextEditor()
         {
             BorderThickness = new Thickness(0); Padding = new Thickness(7, 3, 7, 5); AcceptsTab = true; IsDocumentEnabled = true;
+            IsInactiveSelectionHighlightEnabled = true;
             Document = new FlowDocument { PagePadding = new Thickness(0) };
             ApplyParagraphStyle(Document);
             AddHandler(Hyperlink.RequestNavigateEvent, new System.Windows.Navigation.RequestNavigateEventHandler((s, e) => { if (LinksClickable) OpenLink(e.Uri); e.Handled = true; }));
             PreviewMouseDoubleClick += DoubleClick;
             TextChanged += (s, e) => NormalizeParagraphMargins();
+            DataObject.AddPastingHandler(this, MarkdownPaste);
+            PreviewKeyDown += MarkdownKeyDown;
         }
+        private void MarkdownKeyDown(object sender, KeyEventArgs e)
+        {
+            if (!MarkdownAutoFormat || IsReadOnly || e.Key == Key.ImeProcessed) return;
+            if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.None) { if (MarkdownEditing.TryAutoFormat(this)) e.Handled = true; }
+            else if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.None) { if (MarkdownEditing.Enter(this)) e.Handled = true; }
+        }
+        private void MarkdownPaste(object sender, DataObjectPastingEventArgs e) { if (MarkdownAutoFormat && !IsReadOnly && MarkdownEditing.TryPaste(this, e)) e.CancelCommand(); }
         private static void ApplyParagraphStyle(FlowDocument document)
         {
             var style = new Style(typeof(Paragraph));

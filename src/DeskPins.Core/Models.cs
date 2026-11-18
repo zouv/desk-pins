@@ -15,6 +15,8 @@ namespace DeskPins.Core
     public sealed class Note
     {
         [DataMember] public string Id = Guid.NewGuid().ToString("N");
+        // 本地展示用序号（从 1 开始、删除后不复用）；Id 仍是唯一身份，备份 / 恢复 / 传输都以 Id 为准。
+        [DataMember] public int Number;
         [DataMember] public string Title = "";
         [DataMember] public string Preview = "";
         [DataMember] public NoteKind Kind;
@@ -43,7 +45,7 @@ namespace DeskPins.Core
         [IgnoreDataMember] public List<Tag> DisplayTags { get; set; } = new List<Tag>();
         public string ShortId { get { return string.IsNullOrEmpty(Id) ? "" : Id.Substring(0, Math.Min(8, Id.Length)); } }
         public string Identifier { get { return Id; } }
-        public string ManagerTitle { get { return ShowId ? "id " + ShortId + " " + DisplayTitle : DisplayTitle; } }
+        public string ManagerTitle { get { return ShowId ? "id " + (Number > 0 ? Number.ToString() : ShortId) + " " + DisplayTitle : DisplayTitle; } }
         [IgnoreDataMember] public bool CompactPreview;
         [IgnoreDataMember] public string ColorHex { get { return Color; } }
         public string DisplayPreview { get { return CompactPreview ? "" : Preview; } }
@@ -53,7 +55,7 @@ namespace DeskPins.Core
         {
             var clone = Json.Read<Note>(Json.Bytes(this));
             clone.Body = Body == null ? null : (byte[])Body.Clone(); clone.PlainText = PlainText; clone.ContentDecrypted = ContentDecrypted;
-            clone.Id = Guid.NewGuid().ToString("N"); clone.CreatedUtc = clone.ModifiedUtc = clone.StateUtc = DateTime.UtcNow;
+            clone.Id = Guid.NewGuid().ToString("N"); clone.Number = 0; clone.CreatedUtc = clone.ModifiedUtc = clone.StateUtc = DateTime.UtcNow;
             return clone;
         }
     }
@@ -118,7 +120,7 @@ namespace DeskPins.Core
     [DataContract]
     public sealed class Settings
     {
-        [DataMember] public int Version = 3;
+        [DataMember] public int Version = 4;
         [DataMember] public bool Snap = true, DoubleClickRoll = true, PreventDuplicates = true;
         [DataMember] public bool AlarmFlash = true, AlarmJiggle, AlarmLoop, Networking, UseDns, EmailEnabled, AutoStart, CompactList;
         [DataMember] public int SnoozeMinutes = 5, NetworkPort = 52673, SmtpPort = 587, BackupHours = 24, ClosedRetentionDays = 0;
@@ -154,6 +156,8 @@ namespace DeskPins.Core
         [DataMember] public bool AlarmSoundEnabled = true;
         [DataMember] public bool StartHidden, ConfirmClose;
         [DataMember] public bool ClickMakesVisible = true;
+        // Markdown 行首自动格式化与纯文本粘贴转换；RTF 仍是便签的存储格式。
+        [DataMember] public bool MarkdownAutoFormat = true;
         [DataMember] public int SnapDistance = 10, SnapGap = 2;
         [DataMember] public string DoubleClickAction = "none";
         [DataMember] public bool RolledDifferentPosition, LockPreventsMove, KeepOnScreen;
@@ -221,6 +225,12 @@ namespace DeskPins.Core
                 SearchContent = true; SearchBarExpanded = true;
                 Version = 3;
             }
+            if (Version < 4)
+            {
+                // Markdown auto-format is on by default; old catalogs could not have opted out.
+                MarkdownAutoFormat = true;
+                Version = 4;
+            }
             foreach (var style in Styles) if (style.TabWidth <= 0) style.TabWidth = 50;
         }
     }
@@ -232,11 +242,13 @@ namespace DeskPins.Core
         [DataMember] public List<NoteStack> Stacks = new List<NoteStack>();
         [DataMember] public List<Tag> Tags = new List<Tag>();
         [DataMember] public List<Friend> Friends = new List<Friend>();
+        // 下一个可用的便签序号高水位；只增不减，避免删除最高号后复用旧序号。
+        [DataMember] public int NextNoteNumber = 1;
         [DataMember] public double StackDockLeft = 40, StackDockTop = 40, StackDockWidth = 170;
         [DataMember] public bool StackDockTopmost, StackDockMinimal;
         public void Normalize()
         {
-            if (Settings == null) Settings = new Settings(); Settings.Normalize(); if (Folders == null) Folders = new List<Folder>(); if (Stacks == null) Stacks = new List<NoteStack>(); if (Tags == null) Tags = new List<Tag>(); if (Friends == null) Friends = new List<Friend>();
+            if (Settings == null) Settings = new Settings(); Settings.Normalize(); if (Folders == null) Folders = new List<Folder>(); if (Stacks == null) Stacks = new List<NoteStack>(); if (Tags == null) Tags = new List<Tag>(); if (Friends == null) Friends = new List<Friend>(); if (NextNoteNumber < 1) NextNoteNumber = 1;
             var assigned = new HashSet<string>(Stacks.Where(s => !string.IsNullOrEmpty(s.Color) && s.Color != "#FFFFB4").Select(s => s.Color));
             foreach (var stack in Stacks)
             {

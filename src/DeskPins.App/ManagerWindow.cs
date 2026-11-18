@@ -669,7 +669,7 @@ namespace DeskPins.App
             restoreButton.ToolTip = restoreLabel; closeButton.ToolTip = closeLabel;
             System.Windows.Automation.AutomationProperties.SetName(restoreButton, restoreLabel);
             System.Windows.Automation.AutomationProperties.SetName(closeButton, closeLabel);
-            selectionSummary.Text = selected.Length == 0 ? Ui.Text("未选中便签 · Ctrl / Shift 可多选") : string.Format(Ui.Text("已选中 {0} 张"), selected.Length) + " · " + string.Join(" / ", selected.GroupBy(n => n.State).Select(g => StateText(g.Key) + " " + g.Count()));
+            selectionSummary.Text = selected.Length == 0 ? Ui.Text("未选中便签 · Ctrl / Shift 可多选") : string.Format(Ui.Text("已选中 {0} 张"), selected.Length) + " · " + string.Join(" / ", selected.GroupBy(n => n.State).Select(g => Ui.StateText(g.Key) + " " + g.Count()));
         }
 
         private static FrameworkElement EmptyState(string title, string description, string action = null, Action click = null)
@@ -679,19 +679,6 @@ namespace DeskPins.App
             panel.Children.Add(new TextBlock { Text = Ui.Text(description), Foreground = UiTheme.Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 12) });
             if (click != null) { var button = Ui.Button(action, click); button.HorizontalAlignment = HorizontalAlignment.Left; panel.Children.Add(button); }
             return panel;
-        }
-
-        private static string StateText(NoteState state)
-        {
-            switch (state)
-            {
-                case NoteState.Desktop: return Ui.Text("桌面");
-                case NoteState.Stored: return Ui.Text("已收藏");
-                case NoteState.Closed: return Ui.Text("已关闭");
-                case NoteState.Sleeping: return Ui.Text("休眠中");
-                case NoteState.Recurring: return Ui.Text("重复提醒");
-                default: return Ui.Text("未知状态");
-            }
         }
 
         private void DisplaySelected(bool force = false)
@@ -719,12 +706,12 @@ namespace DeskPins.App
                 var infoRow = new Grid { Margin = new Thickness(0, 0, 0, 10) };
                 infoRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 infoRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                var info = new TextBlock { Text = folderLine + StateText(n.State) + " · " + Ui.Text("修改时间") + " " + n.ModifiedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm") + "\n" + string.Join(" / ", n.Tags.Select(id => host.Library.Catalog.Tags.FirstOrDefault(t => t.Id == id)?.Name).Where(name => name != null)), Foreground = UiTheme.Muted, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Top };
+                var info = new TextBlock { Text = folderLine + Ui.StateText(n.State) + " · " + Ui.Text("修改时间") + " " + n.ModifiedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm") + "\n" + string.Join(" / ", n.Tags.Select(id => host.Library.Catalog.Tags.FirstOrDefault(t => t.Id == id)?.Name).Where(name => name != null)), Foreground = UiTheme.Muted, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Top };
                 Grid.SetColumn(info, 0); infoRow.Children.Add(info);
                 var previewActions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(8, 0, 0, 0) };
                 previewActions.Children.Add(IconButton(IconRetry, "重试保存", SaveEditor));
                 previewActions.Children.Add(IconButton(IconRename, "设置标题…", () => EditNoteTitle(n)));
-                previewActions.Children.Add(IconButton(IconInfo, "属性…", () => ShowNoteProperties(n)));
+                previewActions.Children.Add(IconButton(IconInfo, "属性…", () => NotePropertiesWindow.Show(host, n, this)));
                 if (n.State != NoteState.Desktop) previewActions.Children.Add(IconButton(IconRestore, "恢复到桌面", () => { SaveEditor(); host.FlushNote(n); host.Library.Move(n, NoteState.Desktop); Refresh(); }, primary: true));
                 if (n.State == NoteState.Sleeping || n.State == NoteState.Recurring) previewActions.Children.Add(IconButton(IconClock, "设置提醒…", () => new ScheduleWindow(host, n, true, n.State == NoteState.Recurring) { Owner = this }.ShowDialog()));
                 if (n.Attachment != null) previewActions.Children.Add(IconButton(IconAttach, "设置附着…", () => new AttachWindow(host, n) { Owner = this }.ShowDialog()));
@@ -734,7 +721,7 @@ namespace DeskPins.App
                 DockPanel.SetDock(saveFeedback, Dock.Top); panel.Children.Add(saveFeedback);
                 if (n.Kind == NoteKind.Text)
                 {
-                    editor = new TextEditor { LinksClickable = host.Library.Catalog.Settings.LinksClickable, CheckboxTrailingSpace = host.Library.Catalog.Settings.CheckboxTrailingSpace };
+                    editor = new TextEditor { LinksClickable = host.Library.Catalog.Settings.LinksClickable, CheckboxTrailingSpace = host.Library.Catalog.Settings.CheckboxTrailingSpace, MarkdownAutoFormat = host.Library.Catalog.Settings.MarkdownAutoFormat };
                     editor.Read(n); editor.Background = Ui.Brush(n.Color);
                     editor.TextChanged += (s, e) => { if (!loading) QueueEditorSave(); };
                     editor.PreviewMouseWheel += (s, e) => { if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return; ZoomPreview(e.Delta); e.Handled = true; };
@@ -831,7 +818,7 @@ namespace DeskPins.App
             m.Items.Add(new Separator());
             m.Items.Add(Ui.Item("查看 / 编辑", OpenSelected, enabled: single));
             m.Items.Add(Ui.Item("设置标题…", () => EditNoteTitle(notes.SelectedItem as Note), "F2", enabled: single));
-            m.Items.Add(Ui.Item("属性…", () => ShowNoteProperties(notes.SelectedItem as Note), enabled: single));
+            m.Items.Add(Ui.Item("属性…", () => NotePropertiesWindow.Show(host, notes.SelectedItem as Note, this), enabled: single));
             m.Items.Add(new Separator());
             m.Items.Add(Ui.Item(batch("恢复到桌面"), RestoreSelected, enabled: selected.Any(n => n.State != NoteState.Desktop)));
             m.Items.Add(Ui.Item(batch("关闭便签（可恢复）"), CloseSelected, enabled: selected.Any(n => n.State != NoteState.Closed)));
@@ -846,31 +833,6 @@ namespace DeskPins.App
             m.Items.Add(new Separator());
             m.Items.Add(Ui.Item(batch("永久删除…"), () => { if (Ui.Confirm(string.Format(Ui.Text("永久删除选中的 {0} 张便签？此操作无法恢复。"), Selected().Length), this)) Each(host.Library.Delete); }, enabled: any));
             return m;
-        }
-
-        private void ShowNoteProperties(Note note)
-        {
-            if (note == null) return;
-            var dialog = new Window { Title = Ui.Text("便签属性"), Owner = this, Width = 520, SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
-            UiTheme.Apply(dialog); Ui.FitDialog(dialog, 400, 0);
-            var panel = new StackPanel { Margin = new Thickness(20) };
-            var folder = host.Library.Catalog.Folders.FirstOrDefault(f => f.Id == note.FolderId);
-            var stack = host.Library.Catalog.Stacks.FirstOrDefault(s => s.Id == note.StackId);
-            string[,] values = {
-                { "标题", note.DisplayTitle }, { "状态", StateText(note.State) }, { "类型", Ui.Text(note.Kind == NoteKind.Text ? "文本" : "图片") },
-                { "创建时间", note.CreatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm") }, { "修改时间", note.ModifiedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm") },
-                { "文件夹", folder == null ? Ui.Text("无") : host.FolderPath(folder) }, { "堆叠", stack == null ? Ui.Text("无") : stack.Name },
-                { "标签", string.Join(" / ", note.Tags.Select(id => host.Library.Catalog.Tags.FirstOrDefault(t => t.Id == id)?.Name).Where(name => name != null)) },
-                { "加密", Ui.Text(note.Encrypted ? "是" : "否") }, { "锁定", Ui.Text(note.Locked ? "是" : "否") }, { "标识符", note.Id }
-            };
-            for (int i = 0; i < values.GetLength(0); i++)
-            {
-                var row = new Grid { Margin = new Thickness(0, 0, 0, 8) }; row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(90) }); row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                row.Children.Add(new TextBlock { Text = Ui.Text(values[i, 0]), Foreground = UiTheme.Muted });
-                var value = new TextBox { Text = values[i, 1] ?? "", IsReadOnly = true, TextWrapping = TextWrapping.Wrap, BorderThickness = new Thickness(0), Background = Brushes.Transparent, Padding = new Thickness(0), Foreground = UiTheme.Text };
-                Grid.SetColumn(value, 1); row.Children.Add(value); panel.Children.Add(row);
-            }
-            var close = Ui.Button("关闭", () => dialog.Close()); close.IsCancel = true; close.HorizontalAlignment = HorizontalAlignment.Right; panel.Children.Add(close); dialog.Content = panel; dialog.ShowDialog();
         }
 
         private void SelectNoteInList(string id)

@@ -20,9 +20,10 @@
 
 ## 4. 接口契约
 
-- Note：序列化元数据与非序列化 Body / PlainText 分离；Id 是 GUID 字符串，创建新身份用 Clone。State 只有 Desktop / Closed / Stored / Sleeping / Recurring，附着与堆叠为独立字段。
+- 便签序号：Note.Number 是本地展示用自增序号（从 1 开始），Catalog.NextNoteNumber 保存高水位；Id（GUID）才是备份 / 恢复 / 传输的身份。Create / Copy / Add / 重复提醒克隆统一用 AllocateNumber 分配，Add 总会给外来便签换本地序号。Reload 为旧库（Number=0）与合并备份中的重复序号按加载顺序补号并抬高高水位，随后最好-effort 回写；序号回写失败不能阻断打开或保存。
+- Note：序列化元数据与非序列化 Body / PlainText 分离；Id 是 GUID 字符串，创建新身份用 Clone；Number 只是本地序号，不要用它做恢复匹配或跨设备身份。State 只有 Desktop / Closed / Stored / Sleeping / Recurring，附着与堆叠为独立字段。
 - Body：文本为 RTF，图片为 PNG。Body=null 表示内容未加载，元数据更新不能改写内容。元数据读取失败不重置数据库。
-- DeskPins 文件：`.dpn` 包含元数据、内容和版本；`.dpx` 是带接收身份的包列表；原版 `.sti` / transfer.ini 的完整兼容未验证。
+- DeskPins 文件：`.dpn` 包含元数据、内容和版本；`.dpx` 是带接收身份的包列表；`.md` 导入时用 MarkdownRenderer 转成 RTF，导出时用 MarkdownExporter 从 RTF 反推（有损）；原版 `.sti` / transfer.ini 的完整兼容未验证。
 - AppHost.ValidateDatabase 用只读 Sqlite 检查 quick_check、user_version、便签 Id / 元数据和 Catalog；不证明目标目录可写。RestoreBackup 返回用户确认后的恢复结果；RestoreBackupData 不弹确认，返回唯一保护备份路径，合并 / 选择恢复同 Id 会覆盖当前版本，完整恢复替换便签与设置。
 - NoteLibrary.Reload 先在局部完整读取 Catalog 与按 Id 建立元数据字典，再更新 Catalog / Notes 并清 SessionPassword；读取或重复 Id 失败保持旧内存。ImportBackup 已提交后 Reload 失败必须关闭 Repository，旧内存不能继续写回。
 
@@ -30,4 +31,5 @@
 
 - SQLite 使用系统 DLL，开启 FULL synchronous 和 secure_delete；只对当前库中的记录提供保护，旧备份不随之后的加密设置改变。
 - 恢复前必须确认同 Id 覆盖并创建唯一保护备份。Reload 在完整读取前不能清内存；提交后重载失败必须 storageFailed / Exiting、关闭 Repository 阻断旧写，不能把应用失败说成恢复未提交。
+- Number 是展示序号不是身份：恢复 / 合并新 Id 的便签会得到新的本地 Number，同 Id 覆盖时保留原 Number 更合理但不要依赖它判断是否同一条便签；序号冲突统一由 Reload 去重，不能用 Number 替代 Id 做主键或匹配。
 - StorageFailed 是恢复提交后重载失败的写阻断状态：Repository 关闭阻断所有数据库写入，ManagerWindow.Closing / SaveEditor 跳过保存；AppHost.Dispose 以 CloseInternal(false) 关闭便签，Exit 仍允许无保存退出。

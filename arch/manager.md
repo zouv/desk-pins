@@ -7,7 +7,7 @@
 | 任务 | 入口 |
 |---|---|
 | 管理布局与预览 | ManagerWindow.Refresh / DisplaySelected / OpenSelected / RestoreSelected / UpdateSelectionSummary / ConstrainPaneWidths / SavePaneWidths / ResizeOutlinePane / PaneSplitter / SelectCategory / ScrollRailToSelection / QueueThinScrollBars / IconButton |
-| 管理编辑 / 菜单 / 状态 | ManagerWindow.SaveEditor / QueueEditorSave / ZoomPreview / FlushPending / EditNoteTitle / BeginInlineTitleEdit / ShowNoteProperties / Context / SaveManagerState / RestoreManagerState |
+| 管理编辑 / 菜单 / 状态 | ManagerWindow.SaveEditor / QueueEditorSave / ZoomPreview / FlushPending / EditNoteTitle / BeginInlineTitleEdit / Context / SaveManagerState / RestoreManagerState、NotePropertiesWindow.Show |
 | 管理导航与集合 | ManagerWindow.BuildTree / CreateCollectionItem / BeginInlineCollectionRename / EditCollection / DeleteCollection / MoveCollectionItem / NewNoteIn / DropTo / NodeDrop |
 | 管理器日历 | ManagerWindow.BuildCalendar / BuildCalendarView / CalendarDay / FocusCalendarDate / MatchesDate |
 | 管理器搜索 | ManagerWindow.BuildFindBar / UpdateSearchSummary / ResetSearch / RefreshSearch / SearchResults / OpenSearchTagFilter、SearchTagWindow |
@@ -27,7 +27,7 @@
 
 ## 4. 接口契约
 
-- Note 的管理器展示字段：ManagerTitle 在 Closed 分类显示 `id <ShortId> <标题>`（ShortId 取 Id 前 8 位，完整 Id 在 Identifier / 卡片 ToolTip）；DisplayTags 是 Refresh 时从 Catalog.Tags 解析出的 Tag 列表，仅供 WPF 绑定。DateLabel 固定使用 ModifiedUtc，DateLabelPrefix 由 App 层注入本地化“修改于”，Core 不引用 Ui。WPF 绑定只认属性，不认字段。
+- Note 的管理器展示字段：ManagerTitle 在 Closed 分类显示 `id <Number> <标题>`（Number 是本地自增序号，旧便签在 Reload 时补号；Number=0 时才退回 ShortId）；完整 GUID 在属性页「标识符」/ Identifier 中，序号在属性页「序号」中；DisplayTags 是 Refresh 时从 Catalog.Tags 解析出的 Tag 列表，仅供 WPF 绑定。DateLabel 固定使用 ModifiedUtc，DateLabelPrefix 由 App 层注入本地化“修改于”，Core 不引用 Ui。WPF 绑定只认属性，不认字段。
 - 集合顺序即 Catalog.Folders / Stacks / Tags 的列表顺序；ManagerOrder 等字典仍按稳定分类 id 保存。Folder.ParentId 决定层级，拖动排序时先调整列表顺序再写 ParentId。
 - NoteStack：Left / Top / Width / Height / Topmost 仅保留兼容（旧逐堆叠窗口已合并为面板），不再参与运行；面板状态在 Catalog.StackDockLeft / Top / Width / StackDockTopmost / StackDockMinimal，宽度下限 40。颜色默认自动分配：NoteStack.AutoColor 取调色板首个未用色，Catalog.Normalize 把空色或旧默认 #FFFFB4 视为未分配并补色，手动改色不受影响。
 - Settings.Search*：SearchDesktop / SearchAttached / SearchStored / SearchSleeping / SearchClosed / SearchRecurring 是搜索范围，SearchContent 控制是否查正文，SearchPinFindBar 让查找栏在其他分类也可见，SearchBarExpanded 记住折叠状态，SearchTagFilter 保存标签 id（任一匹配）。

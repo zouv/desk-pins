@@ -52,6 +52,8 @@ namespace DeskPins.App
         private Native.WinEventProc winEvent;
         private IntPtr winHook;
         private readonly HashSet<string> attachedVisible = new HashSet<string>();
+        // 旧 → 新；末尾为最近聚焦的便签。同层窗口按此顺序前置，置顶层优先于普通层由系统保证。
+        private readonly List<string> focusOrder = new List<string>();
         private readonly DispatcherTimer attachmentDebounce;
         public bool Exiting { get; private set; }
         public bool StorageFailed { get { return storageFailed; } }
@@ -104,6 +106,7 @@ namespace DeskPins.App
                 else if (Windows.TryGetValue(n.Id, out window)) { Windows.Remove(n.Id); window.CloseInternal(n.State == NoteState.Desktop); }
             }
             foreach (var id in Windows.Keys.Where(id => !Library.Notes.ContainsKey(id)).ToArray()) { var w = Windows[id]; Windows.Remove(id); w.CloseInternal(false); }
+            focusOrder.RemoveAll(id => !Library.Notes.ContainsKey(id));
             if (Library.Catalog.Stacks.Count > 0) { if (stackDock == null) { stackDock = new StackDockWindow(this); if (!testMode && !hidden) stackDock.Show(); } stackDock.Refresh(); }
             else if (stackDock != null) { stackDock.Close(); stackDock = null; }
             if (startupRestoring) { if (remaining) QueueSync(); else startupRestoring = false; }
@@ -148,14 +151,37 @@ namespace DeskPins.App
             if (testMode) return;
             if (stackDock != null) stackDock.BringForward();
         }
-        public void ShowAllNotes()
+        // 便签激活时更新聚焦顺序，并保证它排在同类窗口最前；不能按字典顺序前置全部窗口，否则刚点击的便签会被后遍历到的便签盖住。
+        public void NoteActivated(NoteWindow window)
+        {
+            if (window == null) return;
+            RememberFocus(window.Note.Id);
+            if (Library.Catalog.Settings.ClickMakesVisible) ShowAllNotes(window);
+            else if (!testMode) Native.RaiseNoActivate(window);
+        }
+        private void RememberFocus(string id)
+        {
+            focusOrder.Remove(id); focusOrder.Add(id);
+        }
+        private void RaiseInFocusOrder()
+        {
+            foreach (var id in focusOrder.ToArray()) { NoteWindow window; if (Windows.TryGetValue(id, out window) && window.IsVisible) Native.RaiseNoActivate(window); }
+            foreach (var window in Windows.Values.Where(w => w.IsVisible && !focusOrder.Contains(w.Note.Id)).ToArray()) Native.RaiseNoActivate(window);
+        }
+        public void ShowAllNotes(NoteWindow active = null)
         {
             if (visibilityChanging) return;
             visibilityChanging = true;
             try
             {
                 hidden = false; solo = ""; Sync();
-                if (!testMode) foreach (var w in Windows.Values) Native.RaiseNoActivate(w);
+                if (!testMode)
+                {
+                    // Sync 期间新显示的窗口可能抢占激活并改写顺序，最后再把触发本次显示的便签放回末尾。
+                    if (active != null) RememberFocus(active.Note.Id);
+                    RaiseInFocusOrder();
+                    if (active != null && !active.IsActive) active.Activate();
+                }
                 BringStacksForward();
             }
             finally { visibilityChanging = false; }
@@ -176,7 +202,17 @@ namespace DeskPins.App
         public void SetHidden(bool value) { if (hidden != value) ToggleAll(); }
         public bool Hidden { get { return hidden; } }
         public void Rescue() { foreach (var n in Library.Notes.Values.Where(n => n.State == NoteState.Desktop)) { FlushNote(n); var b = Native.Clamp(new Rect(n.Left, n.Top, n.Width, n.Height)); n.Left = b.Left; n.Top = b.Top; Library.Save(n); ReloadPosition(n); } }
-        public void BringForward() { hidden = false; Sync(); if (testMode) return; foreach (var w in Windows.Values) { w.Show(); Native.ShowWindow(new WindowInteropHelper(w).Handle, 5); w.Activate(); } BringStacksForward(); }
+        public void BringForward()
+        {
+            hidden = false; Sync(); if (testMode) return;
+            foreach (var w in Windows.Values.ToArray()) { w.Show(); Native.ShowWindow(new WindowInteropHelper(w).Handle, 5); }
+            RaiseInFocusOrder();
+            NoteWindow active = null;
+            for (int i = focusOrder.Count - 1; i >= 0 && active == null; i--) Windows.TryGetValue(focusOrder[i], out active);
+            if (active == null) active = Windows.Values.LastOrDefault();
+            if (active != null) active.Activate();
+            BringStacksForward();
+        }
         public void FlushNote(Note n) { NoteWindow w; if (Windows.TryGetValue(n.Id, out w)) w.Flush(); if (manager != null) manager.FlushPending(n); }
         public void FlushAll() { foreach (var w in Windows.Values.ToArray()) w.Flush(); if (manager != null) manager.FlushPending(); }
         public void Manage() { if (manager == null) { manager = new ManagerWindow(this); manager.Closed += (s, e) => manager = null; } manager.Show(); manager.Activate(); }
@@ -261,14 +297,14 @@ namespace DeskPins.App
         public void LoadImage(Note n, string file) { var bytes = File.ReadAllBytes(file); if (bytes.Length > Transfer.MaxPacket) throw new IOException("图片文件过大。"); var editor = new ImageEditor { MaxUndo = Library.Catalog.Settings.ImageUndoLevels, SaveFormat = Library.Catalog.Settings.ImageSaveType }; editor.Read(bytes); n.Kind = NoteKind.Image; n.Body = editor.Bytes(); n.PlainText = ""; Library.Save(n); }
         public void Export(Note n)
         {
-            Library.Load(n); var file = Ui.SaveFile("DeskPins 便签|*.dpn|Stickies 传输文本|*.sti|RTF|*.rtf|纯文本|*.txt|PNG 图片|*.png", n.DisplayTitle.Replace('/', '_').Replace('\\', '_')); if (file == null) return; ExportTo(n, file);
+            Library.Load(n); var file = Ui.SaveFile("DeskPins 便签|*.dpn|Stickies 传输文本|*.sti|Markdown|*.md|RTF|*.rtf|纯文本|*.txt|PNG 图片|*.png", n.DisplayTitle.Replace('/', '_').Replace('\\', '_')); if (file == null) return; ExportTo(n, file);
         }
-        public void ExportTo(Note n, string file) { FlushNote(n); Library.Load(n); var extension = Path.GetExtension(file).ToLowerInvariant(); byte[] bytes; if (extension == ".dpn") bytes = Json.Bytes(NotePackage.From(n)); else if (extension == ".sti") bytes = new UTF8Encoding(false).GetBytes(Transfer.EncodeSticky(n)); else if (extension == ".txt") bytes = new UTF8Encoding(false).GetBytes(n.PlainText ?? ""); else if (extension == ".rtf" && n.Kind == NoteKind.Text) bytes = n.Body; else if (extension == ".png" && n.Kind == NoteKind.Image) bytes = n.Body; else throw new InvalidDataException("内容类型与导出格式不匹配。"); AtomicFile.Write(file, bytes); }
+        public void ExportTo(Note n, string file) { FlushNote(n); Library.Load(n); var extension = Path.GetExtension(file).ToLowerInvariant(); byte[] bytes; if (extension == ".dpn") bytes = Json.Bytes(NotePackage.From(n)); else if (extension == ".sti") bytes = new UTF8Encoding(false).GetBytes(Transfer.EncodeSticky(n)); else if (extension == ".md" && n.Kind == NoteKind.Text) { var editor = new TextEditor(); editor.Read(n); bytes = new UTF8Encoding(false).GetBytes(MarkdownExporter.ToMarkdown(editor.Document, n.FontSize)); } else if (extension == ".txt") bytes = new UTF8Encoding(false).GetBytes(n.PlainText ?? ""); else if (extension == ".rtf" && n.Kind == NoteKind.Text) bytes = n.Body; else if (extension == ".png" && n.Kind == NoteKind.Image) bytes = n.Body; else throw new InvalidDataException("内容类型与导出格式不匹配。"); AtomicFile.Write(file, bytes); }
         public void Capture() { var capture = new CaptureWindow(Library.Catalog.Settings.ScreenGrabUi); capture.ShowDialog(); if (capture.Result == null) return; var n = Library.Create(NoteKind.Image); var editor = new ImageEditor { MaxUndo = Library.Catalog.Settings.ImageUndoLevels, SaveFormat = Library.Catalog.Settings.ImageSaveType }; editor.Read(new byte[0]); editor.Replace(capture.Result); n.Body = editor.Bytes(); Library.Save(n); Focus(n); }
         public void AddTrayMenu(string label, Action action) { if (tray == null) return; var item = tray.ContextMenuStrip.Items.Add(label); item.Click += (s, e) => action(); }
         public void Import(string file)
         {
-            Note n; string ext = Path.GetExtension(file).ToLowerInvariant(); if (ext == ".dpn") n = Json.Read<NotePackage>(File.ReadAllBytes(file)).Import(); else if (ext == ".sti") n = Transfer.DecodeSticky(File.ReadAllText(file)); else { n = new Note { Body = new byte[0], PlainText = "" }; if (IsImage(file)) { n.Kind = NoteKind.Image; var img = new ImageEditor { MaxUndo = Library.Catalog.Settings.ImageUndoLevels, SaveFormat = Library.Catalog.Settings.ImageSaveType }; img.Read(File.ReadAllBytes(file)); n.Body = img.Bytes(); } else if (ext == ".rtf") { n.Body = File.ReadAllBytes(file); var e = new TextEditor(); e.Read(n); e.Write(n); } else n.PlainText = File.ReadAllText(file); n.Title = Path.GetFileNameWithoutExtension(file); }
+            Note n; string ext = Path.GetExtension(file).ToLowerInvariant(); if (ext == ".dpn") n = Json.Read<NotePackage>(File.ReadAllBytes(file)).Import(); else if (ext == ".sti") n = Transfer.DecodeSticky(File.ReadAllText(file)); else if (ext == ".md") { n = new Note { Body = new byte[0], PlainText = "" }; var defaultFont = Library.Catalog.Settings.DefaultFontName; var defaultSize = Library.Catalog.Settings.DefaultFontSize; n.FontName = defaultFont; n.FontSize = defaultSize; var text = new TextEditor(); text.Document = MarkdownRenderer.ToFlowDocument(File.ReadAllText(file), defaultSize, new FontFamily(defaultFont)); text.Write(n); n.Title = Path.GetFileNameWithoutExtension(file); } else { n = new Note { Body = new byte[0], PlainText = "" }; if (IsImage(file)) { n.Kind = NoteKind.Image; var img = new ImageEditor { MaxUndo = Library.Catalog.Settings.ImageUndoLevels, SaveFormat = Library.Catalog.Settings.ImageSaveType }; img.Read(File.ReadAllBytes(file)); n.Body = img.Bytes(); } else if (ext == ".rtf") { n.Body = File.ReadAllBytes(file); var e = new TextEditor(); e.Read(n); e.Write(n); } else n.PlainText = File.ReadAllText(file); n.Title = Path.GetFileNameWithoutExtension(file); }
             Library.Add(n); Focus(n);
         }
         public void TransferFile(Note n, bool move)
