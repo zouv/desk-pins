@@ -21,6 +21,7 @@ namespace DeskPins.Tests
         private static string auditDirectory;
         private static void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); checks++; Console.WriteLine("PASS " + name); }
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
+        [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
         private static void Throws(Action action, string name) { bool threw = false; try { action(); } catch { threw = true; } Check(threw, name); }
         [STAThread]
         private static int Main(string[] args)
@@ -226,6 +227,13 @@ namespace DeskPins.Tests
                 var image = new ImageEditor(); image.Read(new byte[0]); var bytes = image.Bytes(); Check(bytes.Length > 0, "blank image PNG"); image.Transform("gray"); image.ResizeImage(40, 30); Check(image.Image.PixelWidth == 40 && image.Image.PixelHeight == 30, "WPF image resize"); byte[] rasterPixels = new byte[40 * 30 * 4]; image.Image.CopyPixels(rasterPixels, 40 * 4, 0); Check(rasterPixels.Any(b => b != 0), "GDI image preserves pixels without WPF rendering"); image.Undo(); Check(image.Image.PixelWidth == 250, "image undo");
                 var result = host.Api.Execute("do new sticky API note"); Check(result.StartsWith("000"), "API create"); string id = result.Substring(result.IndexOf(": ") + 2); Check(host.Api.Execute("get desktop " + id + " text").Contains("API note"), "API read"); host.Api.Execute("set desktop " + id + " title Named"); Check(host.Library.Notes[id].Title == "Named", "API update"); host.Api.Execute("do desktop " + id + " delete"); host.Sync(); Check(!host.Library.Repository.LoadMetadata().Any(x => x.Id == id), "UI delete does not reinsert row");
                 host.Api.Execute("do hideall"); host.Api.Execute("do hideall"); Check(host.Hidden, "hideall is idempotent"); host.Api.Execute("do showall"); host.Api.Execute("do showall"); Check(!host.Hidden, "showall is idempotent");
+                var controlMessage = Native.RegisterWindowMessage(AppHost.ControlMessageName); Check(controlMessage != 0, "external control message registered");
+                var controlHandle = Field<HwndSource>(host, "source").Handle;
+                SendMessage(controlHandle, (int)controlMessage, IntPtr.Zero, new IntPtr(0x44504D31)); Check(Field<ManagerWindow>(host, "manager") == null, "external control requires toggle action");
+                SendMessage(controlHandle, (int)controlMessage, (IntPtr)1, new IntPtr(0x44504D30)); Check(Field<ManagerWindow>(host, "manager") == null, "external control requires magic");
+                SendMessage(controlHandle, (int)controlMessage, (IntPtr)1, new IntPtr(0x44504D31)); var controlManager = Field<ManagerWindow>(host, "manager");
+                Check(controlManager != null && controlManager.IsVisible, "external control opens Manage notes");
+                controlManager.Close(); Check(Field<ManagerWindow>(host, "manager") == null, "external control manager closes through the normal path");
                 var activationReveal = host.Windows.Values.First(); activationReveal.Closed += (s, e) => host.ShowAllNotes();
                 host.ToggleAll(); Check(host.Hidden && host.Windows.Count == 0, "bulk hide ignores reentrant activation reveal"); host.ToggleAll(); Check(!host.Hidden, "bulk show works after guarded hide");
                 var transfer = Path.Combine(dir, "transfer.dpx"); host.Library.Catalog.Settings.TransferFile = transfer; var outbound = host.Library.Create(); outbound.PlainText = "transfer content"; host.Library.Save(outbound); host.TransferFile(outbound, false); byte[] originalTransfer = File.ReadAllBytes(transfer); int noteCount = host.Library.Notes.Count; host.ImportTransfer(); Check(host.Library.Notes.Count == noteCount + 1 && new FileInfo(transfer).Length == 0, "transfer consumes only after successful import"); AtomicFile.Write(transfer, originalTransfer); host.ImportTransfer(); Check(host.Library.Notes.Count == noteCount + 1, "transfer retry after interrupted consumption avoids duplicates");

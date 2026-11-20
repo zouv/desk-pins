@@ -50,6 +50,7 @@ namespace DeskPins.App
                 if (command == "-" || command == "new") return "000 created: " + host.New().Id;
                 if (command == "-close" || command == "quit") return "000 exiting";
                 if (command == "-showmanage" || command == "manage") { host.Manage(); return "000 opened"; }
+                if (command == "toggle-manage" || command == "do manage toggle") { host.ToggleManage(); return "000 toggled"; }
                 if (command == "-showsettings" || command == "settings") { Application.Current.Dispatcher.BeginInvoke(new Action(host.Settings)); return "000 opened"; }
                 if (command == "-showhideall" || command == "toggle") { host.ToggleAll(); return "000 toggled"; }
                 if (command == "capture") { Application.Current.Dispatcher.BeginInvoke(new Action(host.Capture)); return "000 opened"; }

@@ -8,6 +8,7 @@
 |---|---|
 | 启动 / 单实例 / 命令行 | Program.Main、ApiService.Identity / Client |
 | 新建 / 显隐 / 托盘 | AppHost.Start / New / Sync / ToggleAll / ShowAllNotes / BuildTray / BuildTrayMenu / SetHidden / ToggleManage |
+| 外部工具切换管理器 | AppHost.Messages（DeskPins.Control）、ToggleManage |
 | 定时 / 休眠恢复 | NoteLibrary.Tick / NextDue、RepeatSchedule.Next、AppHost.Schedule / Tick |
 | 附着显隐 | AppHost.UpdateAttachments / EnsureAttachmentHook、AttachWindow |
 | 插件 / 通信 / 设置 | ApiService.Execute / AddMenus、AppHost.ReceiveLoop / Send / ApplySettings |
@@ -21,6 +22,7 @@
 
 - 网络：CArchive 长度帧 + UTF-8 `#sticky` 属性；最大 16 MiB。包含内容、颜色、位置、回复端口；原版 Unicode 与 FORM 等高级字段仍待核验。
 - IPC：按数据目录和当前用户 SID 派生的 Named Pipe，仅当前用户访问；支持部分 Stickies 风格命令和菜单事件，不宣称完整原版 API 兼容。
+- 外部控制：隐藏 `HwndSource`（标题 `DeskPinsMain`）接收注册消息 `DeskPins.Control`；`wParam=1` 切换 Manage notes，`lParam=0x44504D31` 为约定值。消息在 UI 线程调用与 `WM_HOTKEY id=3` 相同的 `ToggleManage()`；应用未运行时窗口不存在，调用方忽略。`ApiService` 另有 `toggle-manage` 诊断命令。
 
 ## 7. 易踩的坑 / 设计取舍
 
@@ -28,3 +30,4 @@
 - 不在 UI 线程播放完整唤醒声音；网络 I/O 异步，保存与短事务在 UI 线程串行执行。
 - 托盘不再承载导入 / 备份 / 恢复 / 救回；这些操作只在设置-数据页，避免两套入口行为漂移。BuildTrayMenu 独立构造、不显示图标，供 testMode 回归；菜单只能向 ShortcutFor 查询 DefaultShortcuts 已登记动作，截屏无快捷键不查询，新建提示读取 GlobalNewKey。
 - 批量显隐必须覆盖整个 Sync / 窗口关闭过程，而不是只保护显示方向：活动便签关闭会同步激活下一张，ClickMakesVisible 的 Activated → ShowAllNotes 会抵消首次隐藏；ToggleAll / ShowAllNotes 共用 visibilityChanging，不能在 Activated 里另加延时绕过。
+- 外部快捷键工具（AutoHotkey）只向隐藏控制窗口投递切换消息，不启动第二进程、不复制开关逻辑；AHK 只在 `WinExist("DeskPinsMain ...")` 成功时发送，应用未运行即忽略。`Native.ActivateWindow` 统一处理最小化恢复与前台，调用方先 `AllowSetForegroundWindow` 可避免前台锁；权限不一致时 UIPI 会拦截窗口消息，需同权限运行。

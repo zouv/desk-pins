@@ -60,6 +60,11 @@ namespace DeskPins.App
         public string SoloId { get { return solo; } }
         public string DataDirectory { get { return Path.GetFullPath(Path.GetDirectoryName(Library.Repository.FilePath)); } }
         public readonly ApiService Api;
+        public const string ControlWindowTitle = "DeskPinsMain";
+        public const string ControlMessageName = "DeskPins.Control";
+        private const int ControlToggleManage = 1;
+        private const long ControlMagic = 0x44504D31;
+        private static readonly uint ControlMessage = Native.RegisterWindowMessage(ControlMessageName);
         public long WindowCreationMilliseconds;
         public static readonly Dictionary<string, string> DefaultShortcuts = new Dictionary<string, string>
         {
@@ -80,7 +85,7 @@ namespace DeskPins.App
         public AppHost(string dataDirectory, bool testMode = false)
         {
             this.testMode = testMode; Directory.CreateDirectory(dataDirectory); Library = new NoteLibrary(Path.Combine(dataDirectory, "deskpins.db")); Ui.LoadLanguage(Library.Catalog.Settings.Language); appliedLanguage = Ui.CurrentLanguage;
-            source = new HwndSource(new HwndSourceParameters("DeskPinsMain") { Width = 0, Height = 0, WindowStyle = 0 }); source.AddHook(Messages);
+            source = new HwndSource(new HwndSourceParameters(ControlWindowTitle) { Width = 0, Height = 0, WindowStyle = 0 }); source.AddHook(Messages);
             Api = new ApiService(this, dataDirectory);
             attachmentDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(180) }; attachmentDebounce.Tick += (s, e) => { attachmentDebounce.Stop(); UpdateAttachments(); };
             Library.Changed += QueueSync; Library.PreparingChange += FlushNote; Library.Alarm += n => { Sync(); NoteWindow w; if (Windows.TryGetValue(n.Id, out w)) w.StartAlarm(); };
@@ -90,6 +95,12 @@ namespace DeskPins.App
         public void Start() { startupRestoring = true; var s = Library.Catalog.Settings; hidden = s.StartHidden; UpdateAttachments(); if (Library.Notes.Count == 0) { if (s.StartHidden) Library.Create(); else New(); } Sync(); Library.Tick(DateTime.UtcNow); }
         private IntPtr Messages(IntPtr h, int msg, IntPtr w, IntPtr l, ref bool handled)
         {
+            if (ControlMessage != 0 && msg == (int)ControlMessage && l.ToInt64() == ControlMagic)
+            {
+                if (w.ToInt32() == ControlToggleManage) ToggleManage();
+                handled = true;
+                return IntPtr.Zero;
+            }
             if (msg == 0x312) { int id = w.ToInt32(); if (id == 1) New(); else if (id == 2) ToggleAll(); else if (id == 3) ToggleManage(); handled = true; }
             if (msg == 0x4A) { try { var cds = (CopyData)System.Runtime.InteropServices.Marshal.PtrToStructure(l, typeof(CopyData)); if (cds.Size > 0 && cds.Size < Transfer.MaxPacket) { var bytes = new byte[cds.Size]; System.Runtime.InteropServices.Marshal.Copy(cds.Data, bytes, 0, bytes.Length); string command = Encoding.UTF8.GetString(bytes).TrimEnd('\0'); if (command == "api do register" || command == "do register") Api.Register(w); if (command == "api do deregister" || command == "do deregister") Api.Deregister(w); var response = Api.Execute(command); Api.ReplyCopyData(w, cds.Tag, response); if (response == "000 exiting") Application.Current.Dispatcher.BeginInvoke(new Action(Exit)); handled = true; return new IntPtr(1); } } catch (Exception ex) { Log(ex.Message); } }
             return IntPtr.Zero;
@@ -215,13 +226,11 @@ namespace DeskPins.App
         }
         public void FlushNote(Note n) { NoteWindow w; if (Windows.TryGetValue(n.Id, out w)) w.Flush(); if (manager != null) manager.FlushPending(n); }
         public void FlushAll() { foreach (var w in Windows.Values.ToArray()) w.Flush(); if (manager != null) manager.FlushPending(); }
-        public void Manage() { if (manager == null) { manager = new ManagerWindow(this); manager.Closed += (s, e) => manager = null; } manager.Show(); manager.Activate(); }
+        public void Manage() { if (manager == null) { manager = new ManagerWindow(this); manager.Closed += (s, e) => manager = null; } manager.Show(); Native.ActivateWindow(manager); }
         public void ToggleManage()
         {
             if (manager != null && manager.IsVisible && manager.IsActive) { manager.Close(); return; }
             Manage();
-            if (manager != null && manager.WindowState == WindowState.Minimized) manager.WindowState = WindowState.Normal;
-            if (manager != null) manager.Activate();
         }
         public void Settings()
         {

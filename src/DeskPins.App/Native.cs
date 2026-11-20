@@ -40,6 +40,24 @@ namespace DeskPins.App
             var h = new WindowInteropHelper(window).Handle;
             if (h != IntPtr.Zero) SetWindowPos(h, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040);
         }
+        public static void ActivateWindow(Window window)
+        {
+            if (window == null) return;
+            var h = new WindowInteropHelper(window).Handle;
+            if (h == IntPtr.Zero) return;
+            if (IsIconic(h)) ShowWindow(h, 9); else ShowWindow(h, 5);
+            if (SetForegroundWindow(h)) return;
+            var foreground = GetForegroundWindow();
+            uint foregroundThread = foreground == IntPtr.Zero ? 0 : GetWindowThreadProcessId(foreground, IntPtr.Zero);
+            uint currentThread = GetCurrentThreadId();
+            if (foregroundThread != 0 && foregroundThread != currentThread && AttachThreadInput(currentThread, foregroundThread, true))
+            {
+                try { ShowWindow(h, 5); BringWindowToTop(h); SetForegroundWindow(h); }
+                finally { AttachThreadInput(currentThread, foregroundThread, false); }
+                if (GetForegroundWindow() == h) return;
+            }
+            window.Activate();
+        }
         public static bool RegisterHotkey(IntPtr h, int id, string gesture)
         {
             if (string.IsNullOrWhiteSpace(gesture)) return true;
@@ -64,6 +82,13 @@ namespace DeskPins.App
         [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int command);
         [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+        [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr h);
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr processId);
+        [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint attach, uint attachTo, bool value);
+        [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr h);
+        [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern uint RegisterWindowMessage(string name);
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
         [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr(IntPtr h, int index, IntPtr value);
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
