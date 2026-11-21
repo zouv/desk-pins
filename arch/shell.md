@@ -17,6 +17,7 @@
 
 - 计时器按最近到期时间唤醒，不做秒级常驻轮询；系统恢复事件重新计算错过的提醒。附着使用 WinEvent hook 与 180 ms 合并。
 - AppHost.ToggleAll / ShowAllNotes 共用 visibilityChanging 重入保护。隐藏关闭活动便签时，下一张便签的 Activated 不会借 ClickMakesVisible 撤销本次隐藏。
+- 全局隐藏时，`Sync` 把符合显示条件的 `NoteWindow` 移入 `hiddenWindows` 缓存并 `Hide()`，复显时移回 `Windows` 直接 `Show()`；`Windows` 仍只包含当前可见窗口。状态变化 / 删除由 `Sync` 清理缓存，语言切换、恢复备份和退出需同时处理缓存。
 
 ## 4. 接口契约
 
@@ -31,3 +32,4 @@
 - 托盘不再承载导入 / 备份 / 恢复 / 救回；这些操作只在设置-数据页，避免两套入口行为漂移。BuildTrayMenu 独立构造、不显示图标，供 testMode 回归；菜单只能向 ShortcutFor 查询 DefaultShortcuts 已登记动作，截屏无快捷键不查询，新建提示读取 GlobalNewKey。
 - 批量显隐必须覆盖整个 Sync / 窗口关闭过程，而不是只保护显示方向：活动便签关闭会同步激活下一张，ClickMakesVisible 的 Activated → ShowAllNotes 会抵消首次隐藏；ToggleAll / ShowAllNotes 共用 visibilityChanging，不能在 Activated 里另加延时绕过。
 - 外部快捷键工具（AutoHotkey）只向隐藏控制窗口投递切换消息，不启动第二进程、不复制开关逻辑；AHK 只在 `WinExist("DeskPinsMain ...")` 成功时发送，应用未运行即忽略。`Native.ActivateWindow` 统一处理最小化恢复与前台，调用方先 `AllowSetForegroundWindow` 可避免前台锁；权限不一致时 UIPI 会拦截窗口消息，需同权限运行。
+- 全局隐藏缓存 `NoteWindow` 是用隐藏期间的内存换复显速度；不要把这些窗口放回 `Windows`，否则选择、前置、计数和测试会把隐藏便签当成可见窗口。缓存只覆盖“仅因全局 hidden 而不可见”的窗口，关闭 / 存储 / 单便签 / 附着 / 堆叠导致的不可见仍走原有销毁路径。

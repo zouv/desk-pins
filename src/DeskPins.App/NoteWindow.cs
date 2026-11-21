@@ -20,6 +20,7 @@ namespace DeskPins.App
         public readonly AppHost Host;
         public TextEditor TextEditor { get; private set; }
         public ImageEditor ImageEditor { get; private set; }
+        public bool Alarming { get { return alarming; } }
         private readonly Border frame, title;
         private readonly TextBlock caption, indicator;
         private readonly Button closeButton;

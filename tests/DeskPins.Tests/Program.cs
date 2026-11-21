@@ -227,6 +227,14 @@ namespace DeskPins.Tests
                 var image = new ImageEditor(); image.Read(new byte[0]); var bytes = image.Bytes(); Check(bytes.Length > 0, "blank image PNG"); image.Transform("gray"); image.ResizeImage(40, 30); Check(image.Image.PixelWidth == 40 && image.Image.PixelHeight == 30, "WPF image resize"); byte[] rasterPixels = new byte[40 * 30 * 4]; image.Image.CopyPixels(rasterPixels, 40 * 4, 0); Check(rasterPixels.Any(b => b != 0), "GDI image preserves pixels without WPF rendering"); image.Undo(); Check(image.Image.PixelWidth == 250, "image undo");
                 var result = host.Api.Execute("do new sticky API note"); Check(result.StartsWith("000"), "API create"); string id = result.Substring(result.IndexOf(": ") + 2); Check(host.Api.Execute("get desktop " + id + " text").Contains("API note"), "API read"); host.Api.Execute("set desktop " + id + " title Named"); Check(host.Library.Notes[id].Title == "Named", "API update"); host.Api.Execute("do desktop " + id + " delete"); host.Sync(); Check(!host.Library.Repository.LoadMetadata().Any(x => x.Id == id), "UI delete does not reinsert row");
                 host.Api.Execute("do hideall"); host.Api.Execute("do hideall"); Check(host.Hidden, "hideall is idempotent"); host.Api.Execute("do showall"); host.Api.Execute("do showall"); Check(!host.Hidden, "showall is idempotent");
+                var cacheWindow = host.Windows.Values.First(); var cacheId = cacheWindow.Note.Id;
+                host.ToggleAll(); var cachedWindows = Field<System.Collections.Generic.Dictionary<string, NoteWindow>>(host, "hiddenWindows");
+                Check(host.Hidden && host.Windows.Count == 0 && cachedWindows.ContainsKey(cacheId), "hiding all caches note windows outside the visible set");
+                host.ToggleAll();
+                Check(!host.Hidden && host.Windows.ContainsKey(cacheId) && ReferenceEquals(host.Windows[cacheId], cacheWindow), "showing all reuses cached note windows");
+                host.ToggleAll(); host.Library.Move(host.Library.Notes[cacheId], NoteState.Closed); host.Sync();
+                Check(!cachedWindows.ContainsKey(cacheId), "closing a note clears its cached window");
+                host.Library.Move(host.Library.Notes[cacheId], NoteState.Desktop); host.Sync(); host.ToggleAll();
                 var controlMessage = Native.RegisterWindowMessage(AppHost.ControlMessageName); Check(controlMessage != 0, "external control message registered");
                 var controlHandle = Field<HwndSource>(host, "source").Handle;
                 SendMessage(controlHandle, (int)controlMessage, IntPtr.Zero, new IntPtr(0x44504D31)); Check(Field<ManagerWindow>(host, "manager") == null, "external control requires toggle action");

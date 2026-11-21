@@ -35,6 +35,8 @@ namespace DeskPins.App
     {
         public readonly NoteLibrary Library;
         public readonly Dictionary<string, NoteWindow> Windows = new Dictionary<string, NoteWindow>();
+        // 全局隐藏时保留已创建的窗口，复显不再重新加载内容；Windows 仍只包含当前可见窗口。
+        private readonly Dictionary<string, NoteWindow> hiddenWindows = new Dictionary<string, NoteWindow>();
         public readonly HashSet<string> Selected = new HashSet<string>();
         private StackDockWindow stackDock;
         private readonly Dictionary<string, Skin> skins = new Dictionary<string, Skin>();
@@ -112,22 +114,51 @@ namespace DeskPins.App
             if (Exiting) return; int created = 0; bool remaining = false;
             foreach (var n in Library.Notes.Values.ToArray())
             {
-                bool visible = n.State == NoteState.Desktop && !hidden && (solo == "" || solo == n.Id) && (n.Attachment == null || attachedVisible.Contains(n.Id)) && (n.StackId == "" || Library.Catalog.Stacks.Any(s => s.Id == n.StackId && s.Expanded));
-                NoteWindow window; if (visible) { if (!Windows.TryGetValue(n.Id, out window)) { if (startupRestoring && created >= 1) { remaining = true; continue; } created++; var measure = Stopwatch.StartNew(); window = new NoteWindow(this, n); WindowCreationMilliseconds += measure.ElapsedMilliseconds; Windows.Add(n.Id, window); if (!testMode) window.Show(); } else window.RefreshAppearance(); }
-                else if (Windows.TryGetValue(n.Id, out window)) { Windows.Remove(n.Id); window.CloseInternal(n.State == NoteState.Desktop); }
+                bool eligible = NoteEligible(n); bool visible = eligible && !hidden; NoteWindow window;
+                if (visible)
+                {
+                    if (Windows.TryGetValue(n.Id, out window)) { window.RefreshAppearance(); continue; }
+                    if (hiddenWindows.TryGetValue(n.Id, out window))
+                    {
+                        hiddenWindows.Remove(n.Id); Windows.Add(n.Id, window); window.ApplyModel();
+                        if (!testMode) window.Show();
+                        continue;
+                    }
+                    if (startupRestoring && created >= 1) { remaining = true; continue; }
+                    created++; var measure = Stopwatch.StartNew(); window = new NoteWindow(this, n); WindowCreationMilliseconds += measure.ElapsedMilliseconds; Windows.Add(n.Id, window); if (!testMode) window.Show();
+                }
+                else if (eligible && hidden)
+                {
+                    if (Windows.TryGetValue(n.Id, out window))
+                    {
+                        Windows.Remove(n.Id);
+                        if (window.Alarming) window.CloseInternal(n.State == NoteState.Desktop);
+                        else { hiddenWindows[n.Id] = window; window.Hide(); }
+                    }
+                }
+                else
+                {
+                    if (Windows.TryGetValue(n.Id, out window)) { Windows.Remove(n.Id); window.CloseInternal(n.State == NoteState.Desktop); }
+                    if (hiddenWindows.TryGetValue(n.Id, out window)) { hiddenWindows.Remove(n.Id); window.CloseInternal(false); }
+                }
             }
             foreach (var id in Windows.Keys.Where(id => !Library.Notes.ContainsKey(id)).ToArray()) { var w = Windows[id]; Windows.Remove(id); w.CloseInternal(false); }
+            foreach (var id in hiddenWindows.Keys.Where(id => !Library.Notes.ContainsKey(id)).ToArray()) { var w = hiddenWindows[id]; hiddenWindows.Remove(id); w.CloseInternal(false); }
             focusOrder.RemoveAll(id => !Library.Notes.ContainsKey(id));
             if (Library.Catalog.Stacks.Count > 0) { if (stackDock == null) { stackDock = new StackDockWindow(this); if (!testMode && !hidden) stackDock.Show(); } stackDock.Refresh(); }
             else if (stackDock != null) { stackDock.Close(); stackDock = null; }
             if (startupRestoring) { if (remaining) QueueSync(); else startupRestoring = false; }
             if (tray != null) tray.Text = hidden ? "DeskPins · " + Ui.Text("便签已隐藏") : "DeskPins · " + Library.Notes.Count + " " + Ui.Text("张便签");
         }
+        private bool NoteEligible(Note n)
+        {
+            return n.State == NoteState.Desktop && (solo == "" || solo == n.Id) && (n.Attachment == null || attachedVisible.Contains(n.Id)) && (n.StackId == "" || Library.Catalog.Stacks.Any(s => s.Id == n.StackId && s.Expanded));
+        }
         public Note New(NoteKind? kind = null, bool paste = false) { hidden = false; solo = ""; var n = Library.Create(kind ?? Library.Catalog.Settings.DefaultKind); Sync(); Focus(n); if (paste) { NoteWindow w; if (Windows.TryGetValue(n.Id, out w)) Paste(w); } return n; }
         public void Focus(Note n) { hidden = false; solo = ""; if (n.State != NoteState.Desktop) Library.Move(n, NoteState.Desktop); var stack = Library.Catalog.Stacks.FirstOrDefault(s => s.Id == n.StackId); if (stack != null) stack.Expanded = true; Sync(); NoteWindow w; if (Windows.TryGetValue(n.Id, out w)) { if (!testMode) { w.Show(); Native.ShowWindow(new WindowInteropHelper(w).Handle, 5); w.Activate(); } if (w.TextEditor != null) w.TextEditor.Focus(); else if (w.ImageEditor != null) w.ImageEditor.Focus(); } BringStacksForward(); }
         public void Cycle(Note n, int step) { var notes = Windows.Values.Select(w => w.Note).ToList(); int i = notes.FindIndex(x => x.Id == n.Id); if (notes.Count > 0) Focus(notes[(i + step + notes.Count) % notes.Count]); }
-        public void ReloadWindow(Note n) { NoteWindow w; if (Windows.TryGetValue(n.Id, out w)) w.ReloadContent(); }
-        public void ReloadPosition(Note n) { NoteWindow w; if (Windows.TryGetValue(n.Id, out w)) w.ApplyModel(); }
+        public void ReloadWindow(Note n) { NoteWindow w; if (Windows.TryGetValue(n.Id, out w) || hiddenWindows.TryGetValue(n.Id, out w)) w.ReloadContent(); }
+        public void ReloadPosition(Note n) { NoteWindow w; if (Windows.TryGetValue(n.Id, out w) || hiddenWindows.TryGetValue(n.Id, out w)) w.ApplyModel(); }
         public void CloseNotes(Note n) { if (Library.Catalog.Settings.ConfirmClose && !Ui.Confirm(Ui.Text("关闭便签？"))) return; foreach (var target in Targets(n)) Library.Move(target, NoteState.Closed); }
         public void DeleteNotes(Note n) { var targets = Targets(n).ToArray(); if (Ui.Confirm(string.Format(Ui.Text("永久删除 {0} 张便签？此操作无法恢复。"), targets.Length))) foreach (var target in targets) Library.Delete(target); }
         public IEnumerable<Note> Targets(Note n) { return Selected.Contains(n.Id) ? Selected.Where(Library.Notes.ContainsKey).Select(id => Library.Notes[id]).ToArray() : new[] { n }; }
@@ -224,8 +255,8 @@ namespace DeskPins.App
             if (active != null) active.Activate();
             BringStacksForward();
         }
-        public void FlushNote(Note n) { NoteWindow w; if (Windows.TryGetValue(n.Id, out w)) w.Flush(); if (manager != null) manager.FlushPending(n); }
-        public void FlushAll() { foreach (var w in Windows.Values.ToArray()) w.Flush(); if (manager != null) manager.FlushPending(); }
+        public void FlushNote(Note n) { NoteWindow w; if (Windows.TryGetValue(n.Id, out w) || hiddenWindows.TryGetValue(n.Id, out w)) w.Flush(); if (manager != null) manager.FlushPending(n); }
+        public void FlushAll() { foreach (var w in Windows.Values.ToArray()) w.Flush(); foreach (var w in hiddenWindows.Values.ToArray()) w.Flush(); if (manager != null) manager.FlushPending(); }
         public void Manage() { if (manager == null) { manager = new ManagerWindow(this); manager.Closed += (s, e) => manager = null; } manager.Show(); Native.ActivateWindow(manager); }
         public void ToggleManage()
         {
@@ -372,7 +403,8 @@ namespace DeskPins.App
             try
             {
                 foreach (var w in Windows.Values.ToArray()) w.CloseInternal(false);
-                Windows.Clear(); UpdateAttachments(); Sync();
+                foreach (var w in hiddenWindows.Values.ToArray()) w.CloseInternal(false);
+                Windows.Clear(); hiddenWindows.Clear(); UpdateAttachments(); Sync();
                 var errors = ApplySettingsReport();
                 if (errors.Count > 0) Ui.Error(new InvalidOperationException(Ui.Text("恢复已完成，但部分功能应用失败：") + "\n" + string.Join("\n", errors)));
             }
@@ -448,7 +480,7 @@ namespace DeskPins.App
                 if (winHook != IntPtr.Zero) { Native.UnhookWinEvent(winHook); winHook = IntPtr.Zero; }
                 if (Library.Notes.Values.Any(n => n.Attachment != null)) EnsureAttachmentHook();
                 if (languageChanged && languageLoaded) { RefreshLanguageSurfaces(); appliedLanguage = Ui.CurrentLanguage; }
-                else { foreach (var w in Windows.Values) w.RefreshAppearance(); if (stackDock != null) stackDock.Refresh(); }
+                else { foreach (var w in Windows.Values) w.RefreshAppearance(); foreach (var w in hiddenWindows.Values) w.RefreshAppearance(); if (stackDock != null) stackDock.Refresh(); }
             }
             catch (Exception ex) { errors.Add(Ui.Text("界面与附着") + ": " + ex.Message); }
             return errors;
@@ -461,6 +493,7 @@ namespace DeskPins.App
             if (stackDock != null) { stackDock.Close(); stackDock = null; }
             RebuildTray();
             foreach (var w in Windows.Values) w.RefreshAppearance();
+            foreach (var w in hiddenWindows.Values) w.RefreshAppearance();
             if (managerWasOpen) Manage();
             Sync();
         }
@@ -488,7 +521,7 @@ namespace DeskPins.App
             Sync();
         }
         private void EnsureAttachmentHook() { if (winHook != IntPtr.Zero) return; winEvent = (h, ev, w, obj, child, thread, time) => { if (obj != 0 || w == IntPtr.Zero || disposed || OwnsWindow(w)) return; Application.Current.Dispatcher.BeginInvoke(new Action(() => { attachmentDebounce.Stop(); attachmentDebounce.Start(); })); }; winHook = Native.SetWinEventHook(0x8000, 0x800B, IntPtr.Zero, winEvent, 0, 0, 2); }
-        public bool OwnsWindow(IntPtr h) { return h == source.Handle || Windows.Values.Any(w => new WindowInteropHelper(w).Handle == h) || (stackDock != null && new WindowInteropHelper(stackDock).Handle == h) || (manager != null && new WindowInteropHelper(manager).Handle == h) || (settingsWindow != null && new WindowInteropHelper(settingsWindow).Handle == h); }
+        public bool OwnsWindow(IntPtr h) { return h == source.Handle || Windows.Values.Any(w => new WindowInteropHelper(w).Handle == h) || hiddenWindows.Values.Any(w => new WindowInteropHelper(w).Handle == h) || (stackDock != null && new WindowInteropHelper(stackDock).Handle == h) || (manager != null && new WindowInteropHelper(manager).Handle == h) || (settingsWindow != null && new WindowInteropHelper(settingsWindow).Handle == h); }
         private async Task ReceiveLoop(TcpListener current)
         {
             while (!disposed && listener == current) { TcpClient client; try { client = await current.AcceptTcpClientAsync(); } catch (ObjectDisposedException) { break; } catch (SocketException) { break; } _ = Task.Run(() => { using (client) { try { client.ReceiveTimeout = 5000; var text = Transfer.ReadFrame(client.GetStream()); if (text.StartsWith("#getfriends")) { var data = Transfer.Frame(Json.Text(Library.Catalog.Friends)); client.GetStream().Write(data, 0, data.Length); return; } var n = Transfer.DecodeSticky(text); var sourceAddress = ((IPEndPoint)client.Client.RemoteEndPoint).Address; n.Source = sourceAddress.ToString(); if (Library.Catalog.Settings.UseDns) { try { n.Source = Dns.GetHostEntry(sourceAddress).HostName; } catch (SocketException) { } } Application.Current.Dispatcher.BeginInvoke(new Action(() => { Library.Add(n); BringForward(); })); } catch (Exception ex) { Log(ex.Message); } } }); }
@@ -513,6 +546,6 @@ namespace DeskPins.App
         public void Log(string message) { try { lock (logLock) File.AppendAllText(Path.Combine(Path.GetDirectoryName(Library.Repository.FilePath), "deskpins.log"), DateTime.UtcNow.ToString("o") + " " + message + Environment.NewLine); } catch (IOException) { } }
         private readonly object logLock = new object();
         public void Exit() { if (storageFailed) { Dispose(); Application.Current.Shutdown(); return; } if (Exiting) return; FlushAll(); Library.SaveCatalog(); Exiting = true; Dispose(); Application.Current.Shutdown(); }
-        public void Dispose() { if (disposed) return; disposed = true; Exiting = true; if (timer != null) timer.Dispose(); attachmentDebounce.Stop(); if (winHook != IntPtr.Zero) Native.UnhookWinEvent(winHook); Microsoft.Win32.SystemEvents.PowerModeChanged -= PowerChanged; if (listener != null) listener.Stop(); StopSound(); Api.Dispose(); if (manager != null) manager.Close(); if (settingsWindow != null) { settingsWindow.Close(); settingsWindow = null; } foreach (var w in Windows.Values.ToArray()) w.CloseInternal(!storageFailed); Windows.Clear(); if (stackDock != null) { stackDock.Close(); stackDock = null; } Native.UnregisterHotKey(source.Handle, 1); Native.UnregisterHotKey(source.Handle, 2); Native.UnregisterHotKey(source.Handle, 3); source.Dispose(); if (tray != null) { tray.Visible = false; tray.Dispose(); } Library.Dispose(); }
+        public void Dispose() { if (disposed) return; disposed = true; Exiting = true; if (timer != null) timer.Dispose(); attachmentDebounce.Stop(); if (winHook != IntPtr.Zero) Native.UnhookWinEvent(winHook); Microsoft.Win32.SystemEvents.PowerModeChanged -= PowerChanged; if (listener != null) listener.Stop(); StopSound(); Api.Dispose(); if (manager != null) manager.Close(); if (settingsWindow != null) { settingsWindow.Close(); settingsWindow = null; } foreach (var w in Windows.Values.ToArray()) w.CloseInternal(!storageFailed); Windows.Clear(); foreach (var w in hiddenWindows.Values.ToArray()) w.CloseInternal(!storageFailed); hiddenWindows.Clear(); if (stackDock != null) { stackDock.Close(); stackDock = null; } Native.UnregisterHotKey(source.Handle, 1); Native.UnregisterHotKey(source.Handle, 2); Native.UnregisterHotKey(source.Handle, 3); source.Dispose(); if (tray != null) { tray.Visible = false; tray.Dispose(); } Library.Dispose(); }
     }
 }
