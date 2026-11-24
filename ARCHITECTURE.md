@@ -21,11 +21,11 @@ WPF 便签 / 管理 / 设置
 
 | 任务 | 首读 | 入口小节 | 可忽略 |
 |---|---|---|---|
-| 便签编辑和窗口行为 | NoteWindow.cs、AppHost.cs、TextEditor.cs、TextFormatWindow.cs、ImageEditor.cs、Native.cs、WindowResize.cs | arch/notes.md | 通信与迁移 |
+| 便签编辑和窗口行为 | NoteWindow.cs、AppHost.cs、TextEditor.cs、TextFormatWindow.cs、TextContextMenu.cs、ImageEditor.cs、Native.cs、WindowResize.cs | arch/notes.md | 通信与迁移 |
 | Markdown 输入 / 粘贴 / 导出 | TextEditor.cs、NoteWindow.cs（TextMenu）、MarkdownEditing.cs、MarkdownRenderer.cs、MarkdownList.cs、MarkdownExporter.cs | arch/notes.md | 通信与迁移 |
-| 公共 UI、弹框与菜单 | UiTheme.cs、Ui.cs、TextFormatWindow.cs、NotePropertiesWindow.cs、CollectionEditor.cs、CollectionsWindow.cs、ScheduleWindow.cs、AboutWindow.cs；菜单见 NoteWindow.Menu / TextMenu / ImageMenu、AppHost.BuildTray | arch/notes.md | 图片算法与通信协议 |
+| 公共 UI、弹框与菜单 | UiTheme.cs、Ui.cs、TextFormatWindow.cs、TextContextMenu.cs、NotePropertiesWindow.cs、CollectionEditor.cs、CollectionsWindow.cs、ScheduleWindow.cs、AboutWindow.cs；菜单见 NoteWindow.Menu / TextMenu / ImageMenu、AppHost.BuildTray | arch/notes.md | 图片算法与通信协议 |
 | 屏幕截取 / 从屏幕新建图片便签 | CaptureWindow.cs、AppHost.Capture | arch/notes.md | 通信与迁移 |
-| 管理、收藏、标签和堆叠 | ManagerWindow.cs、ManagerWindow.Collections.cs、ManagerWindow.Calendar.cs、ManagerWindow.Search.cs、CollectionEditor.cs、CollectionsWindow.cs(StackDockWindow)、NoteLibrary.cs | arch/manager.md | 通信协议 |
+| 管理、收藏、标签和堆叠 | ManagerWindow.cs、ManagerWindow.Collections.cs、ManagerWindow.Calendar.cs、ManagerWindow.Search.cs、TextContextMenu.cs、CollectionEditor.cs、CollectionsWindow.cs(StackDockWindow)、NoteLibrary.cs | arch/manager.md | 通信协议 |
 | 设置草稿、校验与分项应用 | SettingsWindow.cs、SettingsFieldState.cs、AppHost.ValidateSettings / ApplySettingsReport、Ui.cs、Localization.cs | arch/settings.md | 通信协议与迁移 |
 | 启动级数据目录切换 | DataLocation.cs、Program.Main、SettingsWindow.Save / ReloadDraft、AppHost.ValidateDataDirectory / ValidateDatabase / ApplyDataDirectory | arch/settings.md | 图片算法与通信协议 |
 | 状态、保存、加密和事务 | NoteLibrary.cs、NoteRepository.cs、Models.cs、Crypto.cs | arch/storage.md | 皮肤和通信 |
@@ -77,6 +77,7 @@ WPF 便签 / 管理 / 设置
 | src/DeskPins.App/DataLocation.cs | 默认 / 自定义数据目录解析与 `%LOCALAPPDATA%/DeskPins/data-directory.txt` 指针文件 |
 | src/DeskPins.App/WindowResize.cs | 无边框便签 / 堆叠面板的边缘拖拽缩放与最小尺寸计算 |
 | src/DeskPins.App/TextFormatWindow.cs | 选区 / 全文格式窗口：仅应用显式修改的字体、整数 px 字号、样式、颜色与高亮，保留混合格式 |
+| src/DeskPins.App/TextContextMenu.cs | 桌面便签与管理器正文共用的右键菜单（格式 / Markdown / 段落 / 插入 / 查找 / 高亮）；粘贴与查找等窗口动作由调用方注入 |
 | tests/DeskPins.Tests/ | 无第三方框架的 STA 回归；自建临时数据，结束后清理 |
 | scripts/、manager.sh、*.bat | 构建、运行、打包、性能测量与关闭运行实例的统一入口 |
 | assets/ | 自制图标和 JSON 皮肤示例 |

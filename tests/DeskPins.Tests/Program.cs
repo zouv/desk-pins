@@ -883,6 +883,7 @@ namespace DeskPins.Tests
             }
             window.Content = root; return root;
         }
+        private static void Pump(Window window) { window.Dispatcher.Invoke(new Action(() => { }), System.Windows.Threading.DispatcherPriority.ContextIdle); }
         private static void LayoutTests(AppHost host, ManagerWindow manager, Note note)
         {
             var categories = Field<System.Windows.Controls.ListBox>(manager, "categories"); var preview = Field<System.Windows.Controls.ContentControl>(manager, "preview"); var notes = Field<System.Windows.Controls.ListBox>(manager, "notes"); var homeView = Field<System.Windows.Controls.ScrollViewer>(manager, "homeView");
@@ -910,7 +911,7 @@ namespace DeskPins.Tests
             Check(restoredCategory != null && (int)restoredCategory.Tag == 8 && Field<string>(restoredManager, "folderFilter") == persistFolder.Id && ReferenceEquals(Field<System.Windows.Controls.ListBox>(restoredManager, "notes").SelectedItem, persistNote), "manager restores stored folder and selected note");
             host.Library.Delete(persistNote); host.Library.Catalog.Folders.Remove(persistFolder); host.Library.SaveCatalog();
             var inlineNote = host.Library.Create(); inlineNote.Title = "Inline before"; host.Library.Save(inlineNote); host.Sync();
-            SelectCategory(categories, 1); manager.Refresh(); notes.SelectedItem = inlineNote;
+            SelectCategory(categories, 1); manager.Refresh(); notes.SelectedItem = inlineNote; Pump(manager);
             var inlineHost = (System.Windows.Controls.Panel)typeof(ManagerWindow).GetField("inlineTitleHost", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(manager);
             Check(inlineHost != null, "manager preview exposes inline title host");
             typeof(ManagerWindow).GetMethod("BeginInlineTitleEdit", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(manager, new object[] { inlineNote, inlineHost });
@@ -929,7 +930,7 @@ namespace DeskPins.Tests
             Check(Math.Abs((double)getOutlineWidth.Invoke(manager, new object[] { 8 }) - 230) < .1 && Math.Abs(listColumn.Width.Value - 320) < .1, "manager restores stored pane widths separately");
             host.Library.Catalog.Settings.ManagerOutlineWidths[2] = 220; host.Library.Catalog.Settings.ManagerListWidths[2] = 340;
             host.Library.Catalog.Settings.ManagerOutlineWidths[8] = 220; host.Library.Catalog.Settings.ManagerListWidths[8] = 340; manager.Refresh();
-            host.Library.Move(note, NoteState.Stored); SelectCategory(categories, 8); manager.Refresh(); notes.SelectedItem = note;
+            host.Library.Move(note, NoteState.Stored); SelectCategory(categories, 8); manager.Refresh(); notes.SelectedItem = note; Pump(manager);
             Layout(manager, 900, 520, "manager-minimum"); Check(notes.ActualWidth >= 200 && preview.ActualWidth >= 200, "manager minimum size keeps list and content usable");
             var managerEditor = Field<TextEditor>(manager, "editor"); managerEditor.Document.Blocks.Clear(); var managerParagraph = new System.Windows.Documents.Paragraph(); managerParagraph.Inlines.Add(new System.Windows.Documents.Run("small") { FontSize = 12 }); managerParagraph.Inlines.Add(new System.Windows.Documents.Run("large") { FontSize = 24 }); managerEditor.Document.Blocks.Add(managerParagraph); managerEditor.CaretPosition = managerEditor.Document.ContentStart;
             host.Library.Catalog.Settings.ZoomMinFontSize = 1; host.Library.Catalog.Settings.ZoomMaxFontSize = 200; typeof(ManagerWindow).GetMethod("ZoomPreview", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(manager, new object[] { 120 });
@@ -1187,6 +1188,19 @@ namespace DeskPins.Tests
             Check(aboutTexts.Contains("DeskPins") && aboutTexts.Any(t => t.Contains("作者 @zouv")), "about shows product name and author");
             Check(Descendants((DependencyObject)about.Content).OfType<System.Windows.Controls.Button>().Single(c => c.Content?.ToString() == "关闭").IsCancel, "about supports Escape close");
             Layout(about, 480, 220, "about"); about.Close();
+            var switchA = host.Library.Create(); switchA.PlainText = "switch A"; host.Library.Save(switchA);
+            var switchB = host.Library.Create(); switchB.PlainText = "switch B"; host.Library.Save(switchB);
+            SelectCategory(categories, 1); manager.Refresh();
+            notes.SelectedItem = switchA; Pump(manager);
+            Check(ReferenceEquals(Field<Note>(manager, "editing"), switchA), "manager displays the selected note before switching");
+            notes.SelectedItem = switchB;
+            Check(ReferenceEquals(Field<Note>(manager, "editing"), switchA), "manager paints list selection before reloading preview content");
+            Pump(manager);
+            Check(ReferenceEquals(Field<Note>(manager, "editing"), switchB), "manager preview catches up with the latest selected note");
+            var managerTextMenu = (System.Windows.Controls.ContextMenu)typeof(ManagerWindow).GetMethod("TextMenu", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(manager, null);
+            var managerTextMenuItems = MenuItems(managerTextMenu.Items).Select(m => m.Header.ToString()).ToArray();
+            Check((managerTextMenuItems.Contains(Ui.Text("设置全文格式…")) || managerTextMenuItems.Contains(Ui.Text("设置所选文字格式…"))) && new[] { "Markdown", Ui.Text("段落"), Ui.Text("插入"), Ui.Text("粗体"), Ui.Text("行内代码"), Ui.Text("引用"), Ui.Text("任务列表"), Ui.Text("代码块"), Ui.Text("查找…"), Ui.Text("高亮") }.All(label => managerTextMenuItems.Contains(label)), "manager text menu exposes the same editing actions as desktop notes");
+            host.Library.Delete(switchA); host.Library.Delete(switchB);
             SelectCategory(categories, 8); manager.Refresh();
             Ui.LoadLanguage("en-US"); var englishManager = new ManagerWindow(host); Layout(englishManager, 900, 520, "manager-en"); var englishRailCaptions = Field<System.Windows.Controls.ListBox>(englishManager, "categories").Items.Cast<System.Windows.Controls.ListBoxItem>().Select(i => ((System.Windows.Controls.StackPanel)i.Content).Children.OfType<System.Windows.Controls.TextBlock>().Last()).ToArray(); Check(englishRailCaptions.Any(t => t.Text == "Search results"), "manager icon rail localizes captions"); var attachmentCaption = englishRailCaptions.Single(t => t.Text == "Attachments"); var attachmentMeasure = new System.Windows.Media.FormattedText(attachmentCaption.Text, System.Globalization.CultureInfo.GetCultureInfo("en-US"), FlowDirection.LeftToRight, new System.Windows.Media.Typeface("Segoe UI"), attachmentCaption.FontSize, System.Windows.Media.Brushes.Black, 1.0); Check(attachmentCaption.ActualWidth + .5 >= attachmentMeasure.WidthIncludingTrailingWhitespace, "manager icon rail fits long English labels (actual " + attachmentCaption.ActualWidth + ", needed " + attachmentMeasure.WidthIncludingTrailingWhitespace + ")"); englishManager.Close(); Ui.LoadLanguage("zh-CN");
             reminder.Close(); configuration.Close(); attachment.Close();

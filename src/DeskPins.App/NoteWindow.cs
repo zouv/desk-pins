@@ -425,57 +425,7 @@ namespace DeskPins.App
         }
         private ContextMenu TextMenu()
         {
-            var m = new ContextMenu();
-            m.Items.Add(Ui.Item("剪切", () => TextEditor.Cut(), Host.ShortcutFor("cut"), enabled: !Note.Locked && !TextEditor.Selection.IsEmpty));
-            m.Items.Add(Ui.Item("复制", () => TextEditor.Copy(), Host.ShortcutFor("copy"), enabled: !TextEditor.Selection.IsEmpty));
-            m.Items.Add(Ui.Item("粘贴", () => Host.Paste(this), Host.ShortcutFor("paste"), enabled: !Note.Locked && (Clipboard.ContainsText() || Clipboard.ContainsImage())));
-            m.Items.Add(Ui.Item("粘贴为纯文本", () => Run("paste-plain"), Host.ShortcutFor("paste-plain"), enabled: !Note.Locked && Clipboard.ContainsText()));
-            m.Items.Add(new Separator());
-            m.Items.Add(Ui.Item(TextEditor.Selection.IsEmpty ? "设置全文格式…" : "设置所选文字格式…", () => TextEditor.FontDialog(), enabled: !Note.Locked));
-            var markdown = Ui.Sub("Markdown");
-            var markdownParagraph = TextEditor.CaretPosition == null ? null : TextEditor.CaretPosition.Paragraph;
-            int heading = markdownParagraph == null ? 0 : MarkdownRenderer.HeadingLevel(markdownParagraph, TextEditor.Document.FontSize);
-            bool quoted = markdownParagraph != null && markdownParagraph.BorderThickness.Left > 0;
-            bool hasSelection = !TextEditor.Selection.IsEmpty;
-            for (int level = 1; level <= 6; level++)
-            {
-                int value = level;
-                markdown.Items.Add(Ui.Item(Ui.Text("标题") + " " + level, () => MarkdownEditing.ApplyHeading(TextEditor, value), check: heading == value, enabled: !Note.Locked));
-            }
-            markdown.Items.Add(Ui.Item("正文", () => MarkdownEditing.ApplyHeading(TextEditor, 0), check: heading == 0, enabled: !Note.Locked));
-            markdown.Items.Add(new Separator());
-            markdown.Items.Add(Ui.Item("粗体", () => TextEditor.Format("bold"), Host.ShortcutFor("bold"), enabled: !Note.Locked));
-            markdown.Items.Add(Ui.Item("斜体", () => TextEditor.Format("italic"), Host.ShortcutFor("italic"), enabled: !Note.Locked));
-            markdown.Items.Add(Ui.Item("删除线", () => TextEditor.Format("strike"), Host.ShortcutFor("strike"), enabled: !Note.Locked));
-            markdown.Items.Add(Ui.Item("行内代码", () => MarkdownEditing.ApplyInlineCode(TextEditor), enabled: !Note.Locked && hasSelection));
-            markdown.Items.Add(Ui.Item("插入链接…", () => Run("link"), Host.ShortcutFor("link"), enabled: !Note.Locked));
-            markdown.Items.Add(new Separator());
-            markdown.Items.Add(Ui.Item("项目符号", () => Run("bullets"), enabled: !Note.Locked));
-            markdown.Items.Add(Ui.Item("编号", () => Run("numbers"), enabled: !Note.Locked));
-            markdown.Items.Add(Ui.Item("引用", () => MarkdownEditing.ToggleQuote(TextEditor), check: quoted, enabled: !Note.Locked));
-            markdown.Items.Add(Ui.Item("任务列表", () => MarkdownEditing.ApplyTaskList(TextEditor), enabled: !Note.Locked));
-            markdown.Items.Add(Ui.Item("代码块", () => MarkdownEditing.ApplyCodeBlock(TextEditor), enabled: !Note.Locked));
-            markdown.Items.Add(Ui.Item("插入水平线", () => MarkdownEditing.InsertHorizontalRule(TextEditor), enabled: !Note.Locked));
-            markdown.Items.Add(new Separator());
-            markdown.Items.Add(Ui.Item("应用 Markdown 到所选文字", () => MarkdownEditing.ConvertSelection(TextEditor), enabled: !Note.Locked && hasSelection));
-            markdown.Items.Add(Ui.Item("粘贴 Markdown", () => MarkdownEditing.PasteMarkdown(TextEditor), enabled: !Note.Locked && Clipboard.ContainsText()));
-            markdown.Items.Add(Ui.Item("复制为 Markdown", () => MarkdownEditing.CopyMarkdown(TextEditor)));
-            m.Items.Add(markdown);
-            var paragraph = Ui.Sub("段落");
-            foreach (var pair in new[] { new[] { "项目符号", "bullets" }, new[] { "编号", "numbers" }, new[] { "左对齐", "left" }, new[] { "居中", "center" }, new[] { "右对齐", "right" }, new[] { "从左到右", "ltr" }, new[] { "从右到左", "rtl" } }) { var action = pair[1]; paragraph.Items.Add(Ui.Item(pair[0], () => Run(action), enabled: !Note.Locked)); }
-            m.Items.Add(paragraph);
-            var insert = Ui.Sub("插入");
-            foreach (var pair in new[] { new[] { "插入复选框", "checkbox" }, new[] { "插入链接…", "link" }, new[] { "插入日期时间", "date" } }) { var action = pair[1]; insert.Items.Add(Ui.Item(pair[0], () => Run(action), enabled: !Note.Locked)); }
-            m.Items.Add(insert);
-            m.Items.Add(Ui.Item("查找…", () => Run("find"), Host.ShortcutFor("find")));
-            var highlight = Ui.Sub("高亮");
-            for (int i = 0; i < Host.Library.Catalog.Settings.HighlightColors.Count && i < 7; i++)
-            {
-                var color = Host.Library.Catalog.Settings.HighlightColors[i];
-                highlight.Items.Add(Ui.Item(Ui.Text("颜色") + " " + (i + 1), () => TextEditor.Highlight(color), enabled: !Note.Locked));
-            }
-            highlight.Items.Add(new Separator()); highlight.Items.Add(Ui.Item("清除高亮", () => TextEditor.Highlight(null), enabled: !Note.Locked));
-            m.Items.Add(highlight); return m;
+            return TextContextMenu.Build(TextEditor, Host, Run, () => Host.Paste(this));
         }
         private ContextMenu ImageMenu()
         {

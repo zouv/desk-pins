@@ -46,7 +46,8 @@ namespace DeskPins.App
         private Point dragStart;
         private bool dragReady;
         private DateTime displayedModifiedUtc;
-        private string folderFilter = "", stackFilter = "", tagFilter = "", navigationSnapshot = "";
+        private string folderFilter = "", stackFilter = "", tagFilter = "", navigationSnapshot = "", lastFind = "";
+        private int displayVersion;
         private readonly string[] names = { Ui.Text("首页"), Ui.Text("桌面"), Ui.Text("堆叠"), Ui.Text("附着"), Ui.Text("休眠中"), Ui.Text("重复提醒"), Ui.Text("日历"), Ui.Text("已关闭"), Ui.Text("已收藏"), Ui.Text("标签"), Ui.Text("搜索结果") };
         private static readonly string[] railIcons = { "", "", "", "", "", "", "", "", "", "", "" };
         // Category ids stay stable for persisted pane widths / sort orders; only the rail order changes.
@@ -201,7 +202,7 @@ namespace DeskPins.App
             notes.ItemContainerStyle = noteItemStyle;
             notes.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
             notes.ItemTemplate = NoteCardTemplate();
-            notes.SelectionChanged += (s, e) => { UpdateSelectionSummary(); DisplaySelected(); RememberSelection(); };
+            notes.SelectionChanged += (s, e) => { if (loading) return; UpdateSelectionSummary(); RememberSelection(); ScheduleDisplay(); };
             notes.MouseDoubleClick += (s, e) => OpenSelected();
             notes.PreviewMouseLeftButtonDown += (s, e) => { dragReady = FindItem(e.OriginalSource as DependencyObject) != null; dragStart = e.GetPosition(notes); };
             notes.PreviewMouseLeftButtonUp += (s, e) => dragReady = false;
@@ -232,7 +233,7 @@ namespace DeskPins.App
             host.Library.Changed += Changed;
             Loaded += (s, e) => QueueThinScrollBars();
             Closing += (s, e) => { if (host.StorageFailed) return; try { SaveEditor(); SaveManagerState(); host.Library.SaveCatalog(); } catch (Exception ex) { e.Cancel = true; Ui.Error(ex, this); } };
-            Closed += (s, e) => { saveTimer.Stop(); fontSizeTipTimer.Stop(); searchTimer.Stop(); host.Library.Changed -= Changed; };
+            Closed += (s, e) => { displayVersion++; saveTimer.Stop(); fontSizeTipTimer.Stop(); searchTimer.Stop(); host.Library.Changed -= Changed; };
             Deactivated += (s, e) => { try { SaveEditor(); } catch (Exception ex) { Ui.Error(ex, this); } };
             PreviewKeyDown += (s, e) =>
             {
@@ -245,6 +246,7 @@ namespace DeskPins.App
                 else if (e.Key == Key.Delete && IsOutlineCategory(SelectedCategory) && tree.IsKeyboardFocusWithin) { DeleteSelectedCollection(); e.Handled = true; }
                 else if (e.Key == Key.N && Keyboard.Modifiers == ModifierKeys.Control) { NewNoteForSelection(); e.Handled = true; }
                 else if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control) { SelectCategory(10); BuildTree(); Refresh(); search.Focus(); e.Handled = true; }
+                else if (editor != null && editor.IsKeyboardFocusWithin) HandleEditorKey(e);
             };
             KeyDown += (s, e) => { if (e.Key == Key.Escape) { Close(); e.Handled = true; } };
             RestoreManagerState();
@@ -681,8 +683,16 @@ namespace DeskPins.App
             return panel;
         }
 
+        private void ScheduleDisplay()
+        {
+            // 先让列表选中态绘制出来，再在空闲循环加载正文 / 重建编辑器；连续切换时版本号只保留最后一次。
+            int version = ++displayVersion;
+            Dispatcher.BeginInvoke(new Action(() => { if (version == displayVersion) DisplaySelected(); }), System.Windows.Threading.DispatcherPriority.Background);
+        }
+
         private void DisplaySelected(bool force = false)
         {
+            displayVersion++;
             if (loading || SelectedCategory == 0) return;
             var n = notes.SelectedItem as Note;
             if (!force && ReferenceEquals(editing, n) && n != null && (dirty || n.ModifiedUtc == displayedModifiedUtc)) return;
@@ -724,6 +734,9 @@ namespace DeskPins.App
                     editor = new TextEditor { LinksClickable = host.Library.Catalog.Settings.LinksClickable, CheckboxTrailingSpace = host.Library.Catalog.Settings.CheckboxTrailingSpace, MarkdownAutoFormat = host.Library.Catalog.Settings.MarkdownAutoFormat };
                     editor.Read(n); editor.Background = Ui.Brush(n.Color);
                     editor.TextChanged += (s, e) => { if (!loading) QueueEditorSave(); };
+                    // 与桌面便签一致：在选区内右键先保留选区，再打开同一套正文菜单。
+                    editor.PreviewMouseRightButtonDown += (s, e) => { if (editor.Selection.IsEmpty) return; var position = editor.GetPositionFromPoint(e.GetPosition(editor), true); if (position != null && editor.Selection.Start.CompareTo(position) <= 0 && editor.Selection.End.CompareTo(position) >= 0) e.Handled = true; };
+                    editor.PreviewMouseRightButtonUp += (s, e) => { var menu = TextMenu(); menu.PlacementTarget = editor; menu.IsOpen = true; e.Handled = true; };
                     editor.PreviewMouseWheel += (s, e) => { if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return; ZoomPreview(e.Delta); e.Handled = true; };
                     var editorHost = new Grid(); editorHost.Children.Add(editor);
                     fontSizeTipText = new TextBlock { Foreground = Brushes.White, FontSize = 11, Tag = "ManagerFontSizeTipText" };
@@ -745,6 +758,76 @@ namespace DeskPins.App
             if (sizes.Item1 != sizes.Item2) size += "–" + sizes.Item2.ToString("0");
             fontSizeTipText.Text = Ui.Text("字号：") + size + " px"; fontSizeTip.Visibility = Visibility.Visible; fontSizeTipTimer.Stop(); fontSizeTipTimer.Start();
             QueueEditorSave();
+        }
+
+        private static readonly HashSet<string> EditorShortcuts = new HashSet<string>
+        {
+            "paste", "copy", "cut", "paste-plain", "copy-plain", "undo", "redo", "find", "find-next",
+            "bold", "italic", "underline", "strike", "bullets", "numbers", "checkbox", "link", "date", "rule",
+            "quote", "format-copy", "format-paste"
+        };
+
+        private void HandleEditorKey(KeyEventArgs e)
+        {
+            var key = e.Key == Key.System ? e.SystemKey : e.Key;
+            var mods = Keyboard.Modifiers;
+            if (mods == ModifierKeys.Control && (key == Key.OemOpenBrackets || key == Key.OemCloseBrackets || key == Key.OemMinus || key == Key.OemPlus))
+            {
+                ZoomPreview(key == Key.OemCloseBrackets || key == Key.OemPlus ? 120 : -120);
+                e.Handled = true;
+                return;
+            }
+            if (key == Key.Apps)
+            {
+                var menu = TextMenu();
+                menu.PlacementTarget = editor; menu.IsOpen = true; e.Handled = true;
+                return;
+            }
+            if (mods == ModifierKeys.Shift && key == Key.Delete) { editor.DeleteLine(); e.Handled = true; return; }
+            string action = host.ActionFor(key, mods);
+            if (action == null || !EditorShortcuts.Contains(action)) return;
+            RunEditorAction(action);
+            e.Handled = true;
+        }
+
+        private ContextMenu TextMenu()
+        {
+            return editor == null ? new ContextMenu() : TextContextMenu.Build(editor, host, RunEditorAction, PasteIntoPreview);
+        }
+
+        private void RunEditorAction(string action)
+        {
+            if (editor == null) return;
+            try
+            {
+                switch (action)
+                {
+                    case "paste": PasteIntoPreview(); break;
+                    case "copy": editor.Copy(); break;
+                    case "cut": editor.Cut(); break;
+                    case "undo": editor.Undo(); break;
+                    case "redo": editor.Redo(); break;
+                    case "paste-plain": if (!editor.IsReadOnly && Clipboard.ContainsText()) editor.InsertText(Clipboard.GetText()); break;
+                    case "copy-plain": if (!string.IsNullOrEmpty(editor.SelectedPlainText)) Clipboard.SetText(editor.SelectedPlainText); break;
+                    case "quote": editor.Quote(); break;
+                    case "format-copy": editor.CopyFormat(); break;
+                    case "format-paste": editor.PasteFormat(); break;
+                    case "find":
+                        var term = Ui.Ask("查找", "查找文本", lastFind, false, this);
+                        if (term != null) { lastFind = term; if (!editor.Find(term)) MessageBox.Show(this, Ui.Text("未找到。"), "DeskPins"); }
+                        break;
+                    case "find-next": if (!string.IsNullOrEmpty(lastFind)) editor.Find(lastFind); break;
+                    default: editor.Format(action); break;
+                }
+            }
+            catch (Exception ex) { Ui.Error(ex, this); }
+        }
+
+        private void PasteIntoPreview()
+        {
+            if (editor == null || editor.IsReadOnly) return;
+            if (Clipboard.ContainsImage()) editor.InsertImage(Clipboard.GetImage());
+            else if (Clipboard.ContainsText()) editor.Paste();
         }
         private void QueueEditorSave()
         {

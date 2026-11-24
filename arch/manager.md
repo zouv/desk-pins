@@ -7,7 +7,7 @@
 | 任务 | 入口 |
 |---|---|
 | 管理布局与预览 | ManagerWindow.Refresh / DisplaySelected / OpenSelected / RestoreSelected / UpdateSelectionSummary / ConstrainPaneWidths / SavePaneWidths / ResizeOutlinePane / PaneSplitter / SelectCategory / ScrollRailToSelection / QueueThinScrollBars / IconButton |
-| 管理编辑 / 菜单 / 状态 | ManagerWindow.SaveEditor / QueueEditorSave / ZoomPreview / FlushPending / EditNoteTitle / BeginInlineTitleEdit / Context / SaveManagerState / RestoreManagerState、NotePropertiesWindow.Show |
+| 管理编辑 / 菜单 / 状态 | ManagerWindow.SaveEditor / QueueEditorSave / ZoomPreview / FlushPending / EditNoteTitle / BeginInlineTitleEdit / Context / SaveManagerState / RestoreManagerState、NotePropertiesWindow.Show、ManagerWindow.ScheduleDisplay / TextMenu / RunEditorAction / HandleEditorKey、TextContextMenu.Build |
 | 管理导航与集合 | ManagerWindow.BuildTree / CreateCollectionItem / BeginInlineCollectionRename / EditCollection / DeleteCollection / MoveCollectionItem / NewNoteIn / DropTo / NodeDrop |
 | 管理器日历 | ManagerWindow.BuildCalendar / BuildCalendarView / CalendarDay / FocusCalendarDate / MatchesDate |
 | 管理器搜索 | ManagerWindow.BuildFindBar / UpdateSearchSummary / ResetSearch / RefreshSearch / SearchResults / OpenSearchTagFilter、SearchTagWindow |
@@ -23,6 +23,7 @@
 - 日历由 ManagerWindow.Calendar 自绘，月份 / 星期按 Ui.CurrentLanguage 本地化，计数和列表共用 MatchesDate。月历固定为紧凑 6 周并直接放入日历宿主，不嵌套 ScrollViewer；CalendarDay 支持方向键、PageUp / PageDown 和 Home，FocusCalendarDate 恢复焦点。
 - 搜索由查找栏驱动：SearchResults 先保存预览，再按 SearchContent 选择全文或标题 / Id 匹配，最后应用任一标签与六范围筛选。输入 250 ms 防抖，范围 / 标签变化立即刷新；UpdateSearchSummary 显示有效条件，ResetSearch 清关键词 / 标签并开启六范围与正文，保留 Pin / 折叠状态。
 - 管理器 OpenSelected 只查看 / 编辑历史便签，不迁移状态；恢复按钮单独走 RestoreSelected。UpdateSelectionSummary 和 Context 根据选择数量 / 状态启停并标明批量后果。SaveEditor 成功才清 dirty，失败保留修改和重试反馈；ConstrainPaneWidths 随工作区尺寸约束栏宽，再按分类保存。
+- 列表选中与正文加载分离：SelectionChanged 只更新摘要 / 记忆选中并调用 ScheduleDisplay，由 Background 调度 DisplaySelected；displayVersion 让连续切换只执行最后一次，避免 SQLite 加载与编辑器重建阻塞列表选中态绘制。显式 OpenSelected / Refresh 仍同步显示。正文编辑器使用与桌面便签相同的 TextContextMenu 与右键选区保留逻辑，键盘格式 / Markdown / 查找快捷键经 HandleEditorKey → RunEditorAction 复用同一套动作。
 - 管理器的集合与预览操作使用 IconButton：固定 32×30、Segoe MDL2 图标、ToolTip 与 AutomationProperties.Name；列表 / 大纲 / 预览各占一行水平排列。空态 CTA 与搜索按钮保留文字；查找栏的关闭 X 已改为重置搜索图标。排序下拉使用 UiTheme.ComboBoxStyle：平面边框、居中文本、自绘下拉项。
 
 ## 4. 接口契约
@@ -38,6 +39,7 @@
 
 - 堆叠面板 ShowActivated=false，前置用 SetWindowPos(NOACTIVATE)，不能抢走便签焦点；逐堆叠置顶已废弃，置顶是面板级（Catalog.StackDockTopmost），不要再让 NoteStack.Topmost 参与运行行为。便签左侧 indicator 与堆叠分组色是两个语义：indicator 只表示置顶，分组色只放在关闭按钮底色，不要再混用。
 - 管理便签的内容区是独立第三栏（Home 除外），不要恢复旧的“列表占满 + 隐藏预览”结构；BuildTree 必须把计数纳入快照，否则预览保存会清空选择。
+- 不要在 notes.SelectionChanged 里直接调用 DisplaySelected：SQLite 加载与整块预览重建会让列表选中态等到加载结束才绘制，表现为点击后卡顿。选中变化走 ScheduleDisplay，用 displayVersion 取消过期任务；关闭管理器时也要递增版本。正文右键菜单不要再在 ManagerWindow 里另拼一套，统一走 TextContextMenu.Build。
 - 管理便签的工作区是分类相关布局：不要在所有分类常驻 Stored folders / Stacks / Tags 大纲；只有 2 / 8 / 9 显示大纲，Home 显示仪表盘，其余显示列表 + 内容。第一分隔条必须保持大纲+列表总宽不变（自定义 Thumb），第二分隔条独立调整列表与预览；大纲最小 100px、列表最小 260px。分隔条宽度按分类读取 / 保存 ManagerOutlineWidths / ManagerListWidths，保存时不要覆盖其他分类。
 - 管理便签的导轨可重排，但分类 id 必须稳定：CategoryOrder 只决定显示顺序，所有筛选、设置字典、布局判断都用 ListBoxItem.Tag；改成 SelectedIndex 会让已保存的列宽 / 排序错位。
 - TreeViewItem 拖拽高亮用本地 Background，清理时用 ClearValue 而不是赋 Transparent，否则会压掉默认选中样式。文件夹 Drop 的 1/4、1/2、1/4 分区分别对应排序前、改父目录、排序后；集合排序不要重建 Catalog 字典。

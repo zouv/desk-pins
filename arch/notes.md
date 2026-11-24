@@ -10,7 +10,7 @@
 | 图片算法 | ImageEditor.BeginStroke / ContinueStroke / CommitStroke / CancelEdit / Transform / Crop / ResizeImage、RasterCanvas |
 | 屏幕截取 | AppHost.Capture、CaptureWindow 构造 / Result |
 | 关于窗口 | AboutWindow 构造 / VersionText、AppHost.BuildTray 的“关于 DeskPins”菜单项 |
-| 公共弹框 / 按钮 / 菜单 / 滚动条 | UiTheme.Apply / ApplyThinScrollBars / QueueThinScrollBars / ButtonStyle / ComboBoxStyle、Ui.DialogContent / FitDialog / ActiveWindow / PrimaryButton / DangerButton / Item / StateText；NoteWindow.Menu / TextMenu / ImageMenu、NotePropertiesWindow.Show |
+| 公共弹框 / 按钮 / 菜单 / 滚动条 | UiTheme.Apply / ApplyThinScrollBars / QueueThinScrollBars / ButtonStyle / ComboBoxStyle、Ui.DialogContent / FitDialog / ActiveWindow / PrimaryButton / DangerButton / Item / StateText、TextContextMenu.Build、NoteWindow.Menu / TextMenu / ImageMenu、NotePropertiesWindow.Show |
 | 窗口边缘缩放 | WindowResize.Attach / Calculate、NoteWindow 构造、StackDockWindow 构造 |
 | 标题栏聚焦色 / Pin 色块 | NoteWindow 构造（indicator 事件）、ApplyAppearance / UpdatePinIndicator |
 | 拖拽吸附 | AppHost.SnapAfterDrag、NoteWindow.DragTitle / MoveSelected |
@@ -27,6 +27,7 @@
 - NoteWindow.Zoom 与 ManagerWindow.ZoomPreview 分别统一桌面便签 / 管理器预览的 Ctrl+滚轮缩放：有选区只缩放选区，无选区缩放全文；TextEditor.Scale 按连续文本段读取原字号，ScaledSize 每段固定增减 1px、分别限制范围，保留混合字号的相对大小，逆序应用后恢复选区。Read 在 RTF 加载后把各段字号归一化为整数 px。右上角 Tip 显示 1200ms，统一字号显示整数、混合字号显示整数 px 范围，不抢焦点或鼠标；管理器缩放走 QueueEditorSave 自动保存，图片仍使用原比例范围。
 - 新建便签统一经过 NoteLibrary.Create：先用 Styles[0] 应用颜色等其他样式，再以 Settings.DefaultFontName / DefaultFontSize 覆盖字体和字号，因此桌面、API 与管理器入口一致，已有便签不受影响。
 - TextEditor.FontDialog 打开 TextFormatWindow；无选区目标为全文，有选区只处理选区。对话框以 dirty 标志保证只有显式修改的属性才应用，混合值和第三态复选框保持不变；下划线 / 删除线共用 Inline.TextDecorationsProperty，ApplyDecoration 按文本段保留另一种装饰。NoteWindow 在右键位于现有选区内时拦截 RichTextBox 的右键按下默认行为，避免选区折叠后再生成格式菜单。
+- 正文右键菜单由 TextContextMenu.Build 统一生成：桌面便签传入 Run / Host.Paste，管理器预览传入 RunEditorAction / PasteIntoPreview；剪切、格式窗口、Markdown、段落、插入、查找与高亮条目只维护这一份，两个入口的菜单不会各自漂移。
 - 便签窗口透明度恒为 Note.Opacity（右键菜单 / 样式 / API 显式设置），不随焦点变化；聚焦只靠标题栏底色区分（活动 #4A4A4A / 非活动 #6B6B6B，定义在 UiTheme.TitleActiveColor / TitleInactiveColor，堆叠面板头部共用，皮肤窗口沿用皮肤标题色）。标题栏左侧 6px Pin 色块同时是置顶开关：未置顶时悬停预览浅蓝、单击置顶，已置顶时保持 #9CC3E5、再单击取消；色块在 MouseLeftButtonDown 中标记 Handled，避免触发标题拖动 / 双击行为。Secret 便签失焦仍隐藏内容，属隐私行为不受此影响。
 - 便签层级按聚焦顺序：NoteWindow.Activated → AppHost.NoteActivated 把便签 Id 移到 focusOrder 末尾，并 RaiseNoActivate 前置；ClickMakesVisible 打开时 ShowAllNotes 仍显示全部便签，但必须按 focusOrder 逐张前置、把触发显示的便签约在最后，不能再按 Windows 字典顺序批量前置，否则后遍历的便签会盖住刚点击的便签。置顶（Topmost）仍由系统分层保证，未置顶便签不会盖住置顶便签；托盘“前置所有便签”也按 focusOrder 激活最近聚焦的便签。
 - 公共弹框：Ui.DialogContent 提供滚动正文与固定按钮页脚，FitDialog 限工作区并为非任务栏窗口补活动 Owner；PrimaryButton / DangerButton 区分主要 / 危险动作，确认默认 No。输入框在 Loaded 后 Dispatcher 聚焦 / 全选；集合、联系人、提醒、附着验证失败定位字段，危险动作独立并明确后果。ScheduleWindow 仅对已有休眠 / 重复或闹钟显示“现有提醒”清除区。
